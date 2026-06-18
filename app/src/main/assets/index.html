@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SD Agents</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0a0a0a;color:#f0f0f0;font-family:'Courier New',monospace;min-height:100vh}
+#app{max-width:860px;margin:0 auto;padding:0 0 60px}
+.header{background:#0d0d0d;border-bottom:1px solid #1e1e1e;padding:14px 20px;display:flex;align-items:center;gap:12px;margin-bottom:0}
+.logo{font-size:20px;font-weight:900;color:#36ff5c;letter-spacing:2px}
+.badge{font-size:10px;background:#1a7a2e;color:#36ff5c;padding:2px 8px;border-radius:4px;letter-spacing:1px}
+.site{margin-left:auto;font-size:11px;color:#888}
+.tabs{display:flex;border-bottom:1px solid #1e1e1e;background:#0d0d0d}
+.tab{flex:1;padding:13px 10px;text-align:center;font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer;color:#555;border-bottom:2px solid transparent;transition:all .2s;text-transform:uppercase}
+.tab.active{color:#36ff5c;border-bottom-color:#36ff5c}
+.tab:hover{color:#f0f0f0}
+.page{display:none;padding:20px 16px;display:flex;flex-direction:column;gap:16px}
+.page.hidden{display:none!important}
+.card{background:#111;border:1px solid #1e1e1e;border-radius:10px;padding:20px}
+.card.green-border{border-color:#1a7a2e}
+.section-title{font-size:11px;color:#36ff5c;letter-spacing:3px;text-transform:uppercase;margin-bottom:14px;font-weight:700}
+.dropzone{border:2px dashed #1e1e1e;border-radius:8px;padding:24px 20px;text-align:center;cursor:pointer;margin-bottom:14px;transition:border-color .2s}
+.dropzone.has-files{border-color:#1a7a2e;background:#0d150e}
+.dropzone:hover{border-color:#36ff5c}
+.drop-icon{font-size:26px;margin-bottom:6px}
+.drop-hint{font-size:13px;color:#888}
+.drop-sub{font-size:11px;color:#1a7a2e;margin-top:4px}
+.thumbs{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+.thumb-wrap{position:relative}
+.thumb-wrap img{width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid #1e1e1e;display:block}
+.thumb-del{position:absolute;top:-6px;right:-6px;background:#ff4444;border:none;border-radius:50%;width:18px;height:18px;cursor:pointer;color:#fff;font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center;line-height:1}
+.btn{padding:11px 22px;border-radius:6px;font-weight:700;font-size:12px;letter-spacing:1px;cursor:pointer;font-family:monospace;transition:opacity .15s;border:none}
+.btn-primary{background:#36ff5c;color:#000}
+.btn-outline{background:transparent;border:1px solid #36ff5c;color:#36ff5c}
+.btn:disabled{opacity:.3;pointer-events:none;cursor:default}
+.btn-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
+.dna-box{background:#0d0d0d;border-radius:6px;padding:14px;border:1px solid #1a7a2e;margin-top:14px}
+.dna-line{font-size:12px;color:#f0f0f0;line-height:1.9}
+.dna-arrow{color:#36ff5c}
+.prompt-box{background:#0a0a0a;border:1px solid #1a7a2e;border-radius:8px;padding:14px;font-size:11px;color:#f0f0f0;line-height:1.8;white-space:pre-wrap;word-break:break-word;margin-top:14px}
+.ref-card{max-width:180px;aspect-ratio:9/16;background:linear-gradient(135deg,#1a1a1a,#111);border:2px solid #36ff5c;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:16px;text-align:center;margin:0 auto 16px}
+.ref-card img{max-width:90%;max-height:130px;object-fit:contain;border-radius:6px;filter:drop-shadow(0 4px 12px #36ff5c44)}
+.ref-label{font-size:9px;color:#36ff5c;letter-spacing:2px;text-transform:uppercase}
+.ref-sub{font-size:8px;color:#888;line-height:1.5}
+.error-box{background:#1a0000;border:1px solid #ff4444;border-radius:8px;padding:14px;font-size:12px;color:#ff4444}
+.how-line{font-size:12px;color:#f0f0f0;line-height:2.1}
+.center{text-align:center}
+.hidden{display:none!important}
+.load-msg{font-size:12px;color:#36ff5c;margin-top:10px}
+.api-input{width:100%;background:#0a0a0a;border:1px solid #1e1e1e;border-radius:6px;padding:10px 14px;color:#f0f0f0;font-family:monospace;font-size:12px;outline:none;margin-top:8px}
+.api-input:focus{border-color:#36ff5c}
+.api-input::placeholder{color:#444}
+.api-hint{font-size:10px;color:#555;margin-top:6px}
+/* name agent */
+.field-label{font-size:11px;color:#888;margin-bottom:6px;letter-spacing:1px}
+.text-input{width:100%;background:#0a0a0a;border:1px solid #1e1e1e;border-radius:6px;padding:10px 14px;color:#f0f0f0;font-family:monospace;font-size:13px;outline:none}
+.text-input:focus{border-color:#36ff5c}
+.text-input::placeholder{color:#333}
+select.text-input{cursor:pointer}
+.name-result{margin-top:16px;display:flex;flex-direction:column;gap:10px}
+.name-row{background:#0d0d0d;border:1px solid #1e1e1e;border-radius:8px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;transition:border-color .2s}
+.name-row:hover{border-color:#36ff5c}
+.name-row.best{border-color:#1a7a2e}
+.name-meta{font-size:10px;color:#555;margin-bottom:3px}
+.name-text{font-size:14px;color:#f0f0f0;font-weight:700;word-break:break-all}
+.name-count{font-size:18px;font-weight:900;min-width:36px;text-align:right}
+.name-count.ok{color:#36ff5c}
+.name-count.warn{color:#ff4444}
+.name-copy-hint{font-size:9px;color:#36ff5c;margin-top:3px;opacity:0}
+.name-row:hover .name-copy-hint{opacity:1}
+.thumb-name{width:100%;max-height:160px;object-fit:contain;border-radius:8px;border:1px solid #1e1e1e;display:block;margin-bottom:10px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <span class="logo">SD</span>
+    <span style="font-weight:700;font-size:14px;letter-spacing:1px">Agents</span>
+    <span class="badge">v1.0</span>
+    <span class="site">spardirekt.de</span>
+  </div>
+
+  <!-- TABS -->
+  <div class="tabs">
+    <div class="tab active" data-tab="veo">📸 VEO Reference</div>
+    <div class="tab" data-tab="name">🏷 Product Name</div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════ VEO PAGE -->
+  <div class="page" id="page-veo">
+
+    <!-- API KEY -->
+    <div class="card">
+      <div class="section-title">⓪ Anthropic API Key</div>
+      <input type="password" class="api-input" id="api-key" placeholder="sk-ant-api03-..." autocomplete="off"/>
+      <div class="api-hint" id="api-hint">Ключ хранится только в памяти браузера</div>
+    </div>
+
+    <!-- UPLOAD -->
+    <div class="card">
+      <div class="section-title">① Upload Photos</div>
+      <div class="dropzone" id="dropzone">
+        <div class="drop-icon">📸</div>
+        <div class="drop-hint" id="drop-hint">Drop product photos here or click to browse</div>
+        <div class="drop-sub">max 11 images · JPG / PNG / WEBP</div>
+      </div>
+      <input type="file" id="file-input" multiple accept="image/*" style="display:none"/>
+      <div class="thumbs" id="thumbs"></div>
+    </div>
+
+    <!-- ANALYZE -->
+    <div class="card">
+      <div class="section-title">② Analyze Product</div>
+      <button class="btn btn-primary" id="btn-analyze" disabled>🔍 Analyze Product</button>
+      <div class="load-msg hidden" id="veo-load"></div>
+      <div class="hidden" id="dna-box">
+        <div class="dna-box" id="dna-content"></div>
+      </div>
+    </div>
+
+    <!-- GENERATE -->
+    <div class="card">
+      <div class="section-title">③ Generate 9:16 VEO Photo</div>
+      <button class="btn btn-primary" id="btn-generate" disabled>⚡ Generate 9:16 VEO Photo</button>
+      <div class="hidden" id="result-box">
+        <div class="ref-card" id="ref-card">
+          <span class="ref-label">VEO 3.1 Reference</span>
+          <span class="ref-sub">9:16 · 1080×1920<br>White studio</span>
+        </div>
+        <div class="prompt-box" id="prompt-text"></div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="btn-copy">📋 Copy VEO Prompt</button>
+          <button class="btn btn-outline" id="btn-save">💾 Save TXT</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- HOW TO -->
+    <div class="card green-border hidden" id="how-box">
+      <div class="section-title">④ How to use in VEO 3.1</div>
+      <div class="how-line"><span class="dna-arrow">▸</span> 1. Upload photo to VEO 3.1 as <strong>FIRST FRAME</strong></div>
+      <div class="how-line"><span class="dna-arrow">▸</span> 2. Paste prompt into VEO prompt field</div>
+      <div class="how-line"><span class="dna-arrow">▸</span> 3. Duration: 4–6 seconds per clip</div>
+      <div class="how-line"><span class="dna-arrow">▸</span> 4. Generate → assemble in CapCut</div>
+      <div class="how-line"><span class="dna-arrow">▸</span> 5. NEVER use "reference image" — morphs the product</div>
+    </div>
+
+    <div class="error-box hidden" id="veo-error"></div>
+    <div class="center hidden" id="veo-new-wrap">
+      <button class="btn btn-outline" id="btn-new">🔄 New Product</button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════ NAME PAGE -->
+  <div class="page hidden" id="page-name">
+
+    <!-- API KEY (shared display) -->
+    <div class="card">
+      <div class="section-title">⓪ Anthropic API Key</div>
+      <input type="password" class="api-input" id="api-key2" placeholder="sk-ant-api03-..." autocomplete="off"/>
+      <div class="api-hint" id="api-hint2">Ключ хранится только в памяти браузера</div>
+    </div>
+
+    <!-- INPUTS -->
+    <div class="card">
+      <div class="section-title">① Product Info</div>
+
+      <div class="field-label">Product Title (EN or DE)</div>
+      <input type="text" class="text-input" id="n-title" placeholder="z.B. Fly Fishing Box 100pcs"/>
+
+      <div style="height:12px"></div>
+      <div class="field-label">Category</div>
+      <select class="text-input" id="n-cat">
+        <option value="">— Select category —</option>
+        <option>Angeln / Fishing</option>
+        <option>Outdoor / Camping</option>
+        <option>Haus & Garten</option>
+        <option>Auto & Motorrad</option>
+        <option>Sport & Fitness</option>
+        <option>Küche & Haushalt</option>
+        <option>Elektronik</option>
+        <option>Werkzeug</option>
+        <option>Sonstiges</option>
+      </select>
+
+      <div style="height:12px"></div>
+      <div class="field-label">Product Image (optional)</div>
+      <div class="dropzone" id="n-dropzone" style="padding:16px">
+        <div class="drop-icon" style="font-size:20px">🖼</div>
+        <div class="drop-hint" style="font-size:12px" id="n-drop-hint">Click or drop product image</div>
+      </div>
+      <input type="file" id="n-file" accept="image/*" style="display:none"/>
+      <img id="n-thumb" class="thumb-name hidden"/>
+
+      <div style="height:12px"></div>
+      <div class="field-label">Seller Description (optional)</div>
+      <input type="text" class="text-input" id="n-desc" placeholder="z.B. wasserdicht, 100 Stück, für Forellen"/>
+    </div>
+
+    <!-- GENERATE NAMES -->
+    <div class="card">
+      <div class="section-title">② Generate Names</div>
+      <button class="btn btn-primary" id="btn-names" disabled>🏷 Generate 5 Names</button>
+      <div class="load-msg hidden" id="name-load"></div>
+      <div class="hidden" id="names-result">
+        <div class="name-result" id="names-list"></div>
+        <div class="btn-row">
+          <button class="btn btn-outline" id="btn-names-new">🔄 New Product</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="error-box hidden" id="name-error"></div>
+  </div>
+
+</div><!-- /app -->
+
+<script>
+// ── SHARED STATE ─────────────────────────────────────────────────────────────
+const veoPhotos = [];
+let currentDNA = null, currentPrompt = "";
+let namePhoto = null; // {base64, mimeType}
+
+// ── ELEMENTS ──────────────────────────────────────────────────────────────────
+const apiKeyEl  = document.getElementById('api-key');
+const apiKeyEl2 = document.getElementById('api-key2');
+const apiHint   = document.getElementById('api-hint');
+const apiHint2  = document.getElementById('api-hint2');
+
+function getKey(){ return (apiKeyEl.value||apiKeyEl2.value).trim(); }
+
+function syncKeys(src, dest, hint){
+  const v = src.value;
+  dest.value = v;
+  const ok = v.trim().startsWith('sk-ant-');
+  hint.textContent = ok ? '✅ Ключ введён' : 'Ключ хранится только в памяти браузера';
+  hint.style.color  = ok ? '#36ff5c' : '#555';
+  updateVeoUI(); updateNameUI();
+}
+apiKeyEl.addEventListener('input', ()=> syncKeys(apiKeyEl, apiKeyEl2, apiHint));
+apiKeyEl2.addEventListener('input',()=> syncKeys(apiKeyEl2, apiKeyEl, apiHint2));
+
+// ── TABS ──────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    document.querySelectorAll('.page').forEach(p=>p.classList.add('hidden'));
+    document.getElementById('page-'+tab.dataset.tab).classList.remove('hidden');
+  });
+});
+
+// ── UTILS ─────────────────────────────────────────────────────────────────────
+const show = el => el.classList.remove('hidden');
+const hide = el => el.classList.add('hidden');
+function setLoad(el, msg){ if(msg){ show(el); el.textContent='⏳ '+msg; }else hide(el); }
+function showErr(el, msg){ el.textContent='⚠ '+msg; show(el); }
+function clearErr(el){ hide(el); }
+
+function readBase64(file){
+  return new Promise((res,rej)=>{
+    const r=new FileReader(); r.onload=()=>res(r.result.split(',')[1]); r.onerror=rej; r.readAsDataURL(file);
+  });
+}
+
+async function callClaude(system, messages, maxTokens=1000){
+  const resp = await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'x-api-key': getKey(),
+      'anthropic-version':'2023-06-01',
+      'anthropic-dangerous-direct-browser-access':'true'
+    },
+    body: JSON.stringify({model:'claude-sonnet-4-6', max_tokens:maxTokens, system, messages})
+  });
+  if(!resp.ok){ const t=await resp.text(); throw new Error(`API ${resp.status}: ${t}`); }
+  const data = await resp.json();
+  return data.content.map(b=>b.text||'').join('');
+}
+
+// ════════════════════════════════════════ VEO AGENT ══════════════════════════
+
+const dropzone   = document.getElementById('dropzone');
+const fileInput  = document.getElementById('file-input');
+const thumbsEl   = document.getElementById('thumbs');
+const dropHint   = document.getElementById('drop-hint');
+const btnAnalyze = document.getElementById('btn-analyze');
+const btnGenerate= document.getElementById('btn-generate');
+const btnCopy    = document.getElementById('btn-copy');
+const btnSave    = document.getElementById('btn-save');
+const btnNew     = document.getElementById('btn-new');
+const veoLoad    = document.getElementById('veo-load');
+const dnaBox     = document.getElementById('dna-box');
+const dnaContent = document.getElementById('dna-content');
+const resultBox  = document.getElementById('result-box');
+const promptText = document.getElementById('prompt-text');
+const refCard    = document.getElementById('ref-card');
+const howBox     = document.getElementById('how-box');
+const veoErr     = document.getElementById('veo-error');
+const veoNewWrap = document.getElementById('veo-new-wrap');
+
+function updateVeoUI(){
+  const hasKey = getKey().startsWith('sk-ant-');
+  btnAnalyze.disabled = !(veoPhotos.length>0 && hasKey);
+}
+
+function renderThumbs(){
+  thumbsEl.innerHTML='';
+  veoPhotos.forEach((p,i)=>{
+    const wrap=document.createElement('div'); wrap.className='thumb-wrap';
+    const img=document.createElement('img'); img.src=p.preview;
+    const del=document.createElement('button'); del.className='thumb-del'; del.textContent='✕';
+    del.onclick=(e)=>{ e.stopPropagation(); veoPhotos.splice(i,1); renderThumbs(); updateVeoUI(); };
+    wrap.appendChild(img); wrap.appendChild(del); thumbsEl.appendChild(wrap);
+  });
+  dropHint.textContent = veoPhotos.length ? `${veoPhotos.length}/11 loaded — click to add more` : 'Drop product photos here or click to browse';
+  dropzone.classList.toggle('has-files', veoPhotos.length>0);
+}
+
+async function handleVeoFiles(files){
+  const valid=Array.from(files).filter(f=>f.type.startsWith('image/')).slice(0,11-veoPhotos.length);
+  for(const f of valid){ const b64=await readBase64(f); veoPhotos.push({preview:URL.createObjectURL(f),base64:b64,mimeType:f.type}); }
+  renderThumbs(); updateVeoUI(); clearErr(veoErr);
+}
+
+dropzone.addEventListener('click',()=>fileInput.click());
+fileInput.addEventListener('change',e=>handleVeoFiles(e.target.files));
+dropzone.addEventListener('dragover',e=>e.preventDefault());
+dropzone.addEventListener('drop',e=>{e.preventDefault();handleVeoFiles(e.dataTransfer.files);});
+
+btnAnalyze.addEventListener('click', async()=>{
+  clearErr(veoErr); btnAnalyze.disabled=true; setLoad(veoLoad,'Analyzing product…');
+  try {
+    const imageBlocks=veoPhotos.map(p=>({type:'image',source:{type:'base64',media_type:p.mimeType,data:p.base64}}));
+    const text=await callClaude(
+      `You are a product photography analyst for VEO 3.1. Extract precise Product DNA.
+IGNORE: TikTok UI, prices, buttons, watermarks, people, screenshots, backgrounds.
+Return ONLY a valid JSON array of short English descriptive strings. No markdown. Max 18 items.`,
+      [{role:'user',content:[...imageBlocks,{type:'text',text:'Extract Product DNA. JSON array only.'}]}],1000);
+    let dna;
+    try{ dna=JSON.parse(text.replace(/```json|```/g,'').trim()); }
+    catch(_){ dna=text.split('\n').filter(l=>l.trim().length>2).map(l=>l.replace(/^[-*"\d.]+\s*/,'').replace(/[",]/g,'').trim()).filter(Boolean); }
+    currentDNA=dna;
+    dnaContent.innerHTML=dna.map(l=>`<div class="dna-line"><span class="dna-arrow">▸</span> ${l}</div>`).join('');
+    show(dnaBox); btnGenerate.disabled=false;
+  }catch(e){ showErr(veoErr,'Analysis failed: '+e.message); }
+  finally{ setLoad(veoLoad,null); btnAnalyze.disabled=false; }
+});
+
+btnGenerate.addEventListener('click', async()=>{
+  if(!currentDNA) return;
+  clearErr(veoErr); btnGenerate.disabled=true; setLoad(veoLoad,'Building VEO prompt…');
+  try{
+    const prompt=await callClaude(
+      `Create ultra-precise VEO 3.1 reference image prompt.
+Start: "Use this image as strict product reference. Do not change product shape, material, color, layout, size, or details."
+Product centered, white studio bg, 9:16 1080×1920, no text/logo/people.
+Ultra photorealistic, sharp, soft shadow.
+End: "Shot on Sony A7R IV, 85mm macro, f/8, soft box, white seamless, 9:16 portrait"
+Return ONLY the prompt.`,
+      [{role:'user',content:`Product DNA: ${currentDNA.join(', ')}\n\nBuild VEO 3.1 prompt.`}],600);
+    currentPrompt=prompt.trim();
+    promptText.textContent=currentPrompt;
+    if(veoPhotos[0]){
+      const ex=refCard.querySelector('img'); if(ex) ex.remove();
+      const img=document.createElement('img'); img.src=veoPhotos[0].preview; refCard.prepend(img);
+    }
+    show(resultBox); show(howBox); show(veoNewWrap);
+  }catch(e){ showErr(veoErr,'Generation failed: '+e.message); }
+  finally{ setLoad(veoLoad,null); btnGenerate.disabled=false; }
+});
+
+btnCopy.addEventListener('click',()=>{
+  navigator.clipboard.writeText(currentPrompt).then(()=>{ btnCopy.textContent='✅ Copied!'; setTimeout(()=>{ btnCopy.textContent='📋 Copy VEO Prompt'; },2000); });
+});
+btnSave.addEventListener('click',()=>{
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([currentPrompt],{type:'text/plain'}));
+  a.download='veo-prompt.txt'; a.click();
+});
+btnNew.addEventListener('click',()=>{
+  veoPhotos.length=0; currentDNA=null; currentPrompt='';
+  renderThumbs(); updateVeoUI();
+  hide(dnaBox); hide(resultBox); hide(howBox); hide(veoNewWrap); clearErr(veoErr);
+  setLoad(veoLoad,null); btnGenerate.disabled=true;
+  const img=refCard.querySelector('img'); if(img) img.remove();
+});
+
+// ════════════════════════════════════════ NAME AGENT ═════════════════════════
+
+const nDropzone = document.getElementById('n-dropzone');
+const nFile     = document.getElementById('n-file');
+const nThumb    = document.getElementById('n-thumb');
+const nDropHint = document.getElementById('n-drop-hint');
+const nTitle    = document.getElementById('n-title');
+const nCat      = document.getElementById('n-cat');
+const nDesc     = document.getElementById('n-desc');
+const btnNames  = document.getElementById('btn-names');
+const nameLoad  = document.getElementById('name-load');
+const namesRes  = document.getElementById('names-result');
+const namesList = document.getElementById('names-list');
+const nameErr   = document.getElementById('name-error');
+const btnNamesNew=document.getElementById('btn-names-new');
+
+function updateNameUI(){
+  const hasKey = getKey().startsWith('sk-ant-');
+  const hasTitle = nTitle.value.trim().length > 0;
+  btnNames.disabled = !(hasKey && hasTitle);
+}
+
+nTitle.addEventListener('input', updateNameUI);
+nCat.addEventListener('change', updateNameUI);
+
+nDropzone.addEventListener('click',()=>nFile.click());
+nDropzone.addEventListener('dragover',e=>e.preventDefault());
+nDropzone.addEventListener('drop',async e=>{
+  e.preventDefault();
+  const f=e.dataTransfer.files[0];
+  if(f&&f.type.startsWith('image/')) await loadNamePhoto(f);
+});
+nFile.addEventListener('change',async e=>{ if(e.target.files[0]) await loadNamePhoto(e.target.files[0]); });
+
+async function loadNamePhoto(f){
+  const b64=await readBase64(f);
+  namePhoto={base64:b64,mimeType:f.type};
+  nThumb.src=URL.createObjectURL(f); show(nThumb);
+  nDropHint.textContent='✅ Image loaded — click to change';
+}
+
+function cleanName(s){
+  return s.replace(/[–—|\/\\]/g,'').replace(/[^\w\säöüÄÖÜß&\-,.!?()]/g,'').replace(/\s+/g,' ').trim().slice(0,30);
+}
+
+btnNames.addEventListener('click', async()=>{
+  clearErr(nameErr); btnNames.disabled=true; setLoad(nameLoad,'Generating names…');
+  hide(namesRes);
+  try{
+    const contentParts=[];
+    if(namePhoto) contentParts.push({type:'image',source:{type:'base64',media_type:namePhoto.mimeType,data:namePhoto.base64}});
+    const userText=`Product title: ${nTitle.value.trim()}
+Category: ${nCat.value||'Sonstiges'}
+Seller info: ${nDesc.value.trim()||'none'}
+
+Generate 5 German TikTok Shop product names.`;
+    contentParts.push({type:'text',text:userText});
+
+    const text=await callClaude(
+      `You generate short German product names for TikTok Shop.
+RULES:
+- Maximum 30 characters each
+- German language
+- NO invalid symbols: no –, —, |, /, \\, emoji
+- No exaggerated claims, no fake brand
+- Product type must be clear immediately
+- Search-friendly, clickable, suitable for TikTok videos
+- If a name exceeds 30 chars, shorten it automatically
+- Remove any invalid characters automatically
+
+Return ONLY a valid JSON array of exactly 5 objects:
+[
+  {"label":"Best option","name":"...","chars":0},
+  {"label":"Alternative","name":"...","chars":0},
+  {"label":"Sales-focused","name":"...","chars":0},
+  {"label":"Simple","name":"...","chars":0},
+  {"label":"Keyword-focused","name":"...","chars":0}
+]
+Fill "chars" with the actual character count. No markdown, no explanation.`,
+      [{role:'user',content:contentParts}],800);
+
+    let names;
+    try{ names=JSON.parse(text.replace(/```json|```/g,'').trim()); }
+    catch(_){ throw new Error('Could not parse response. Try again.'); }
+
+    // sanitize
+    names=names.map(n=>({ ...n, name:cleanName(n.name), chars:cleanName(n.name).length }));
+
+    namesList.innerHTML='';
+    names.forEach((n,i)=>{
+      const over = n.chars>30;
+      const row=document.createElement('div');
+      row.className='name-row'+(i===0?' best':'');
+      row.innerHTML=`
+        <div style="flex:1;min-width:0">
+          <div class="name-meta">${n.label}</div>
+          <div class="name-text">${n.name}</div>
+          <div class="name-copy-hint">tap to copy</div>
+        </div>
+        <div class="name-count ${over?'warn':'ok'}">${n.chars}</div>`;
+      row.addEventListener('click',()=>{
+        navigator.clipboard.writeText(n.name).then(()=>{
+          const orig=row.querySelector('.name-copy-hint').textContent;
+          row.querySelector('.name-copy-hint').textContent='✅ copied!';
+          setTimeout(()=>{ row.querySelector('.name-copy-hint').textContent=orig; },1500);
+        });
+      });
+      namesList.appendChild(row);
+    });
+    show(namesRes);
+  }catch(e){ showErr(nameErr,'Failed: '+e.message); }
+  finally{ setLoad(nameLoad,null); updateNameUI(); }
+});
+
+btnNamesNew.addEventListener('click',()=>{
+  nTitle.value=''; nCat.value=''; nDesc.value='';
+  namePhoto=null; hide(nThumb); nDropHint.textContent='Click or drop product image';
+  nFile.value=''; hide(namesRes); clearErr(nameErr); updateNameUI();
+});
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+updateVeoUI(); updateNameUI();
+// show veo page by default
+document.getElementById('page-veo').classList.remove('hidden');
+</script>
+</body>
+</html>
