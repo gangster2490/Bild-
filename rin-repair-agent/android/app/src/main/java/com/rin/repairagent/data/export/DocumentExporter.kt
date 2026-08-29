@@ -396,7 +396,18 @@ class DocumentExporter {
         val textX = margin * 2 + photoW
         val textW = slideW - textX - margin
         val toolLine = if (tools.isNotEmpty()) "Инструменты / Tools: ${tools.joinToString(", ")}" else ""
-        val body = wrap(instruction, 55) + listOf("") + wrap(toolLine, 55) + listOf("") + wrap("⚠ $warning", 55)
+        val warnLine = warning.trim().takeIf { it.isNotEmpty() }?.let { "⚠ $it" }.orEmpty()
+        val body = buildList {
+            addAll(wrap(instruction, 55))
+            if (toolLine.isNotEmpty()) {
+                add("")
+                addAll(wrap(toolLine, 55))
+            }
+            if (warnLine.isNotEmpty()) {
+                add("")
+                addAll(wrap(warnLine, 55))
+            }
+        }
 
         fun textShape(name: String, x: Long, y: Long, cx: Long, cy: Long, lines: List<String>, font: Int, bold: Boolean): String {
             val runs = lines.joinToString("") { line ->

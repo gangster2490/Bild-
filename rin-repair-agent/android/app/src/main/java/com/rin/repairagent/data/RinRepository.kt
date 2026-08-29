@@ -284,22 +284,29 @@ class RinRepository(
     fun validateForExport(project: RepairProject): ExportValidation {
         val errors = mutableListOf<String>()
         val loaded = project.photos.size
-        val used = project.photos.count { it.reviewStatus != ReviewStatus.CAN_DELETE }
+        val exportable = project.photos.filter { it.reviewStatus != ReviewStatus.CAN_DELETE }
+        val used = exportable.size
         val skipped = project.photos.count { it.reviewStatus == ReviewStatus.CAN_DELETE }
-        val needing = project.photos.count {
+        // Only photos that will be exported can block review completion
+        val needing = exportable.count {
             it.reviewStatus == ReviewStatus.NEEDS_REVIEW ||
                 it.reviewStatus == ReviewStatus.UNCLEAR ||
-                !it.confirmed
+                !it.confirmed ||
+                it.analysis == null
         }
-        val paths = project.photos.map { it.localPath }
+        val paths = exportable.map { it.localPath }
         val duplicates = paths.size - paths.toSet().size
         if (loaded == 0) errors += "Нет загруженных фотографий"
         if (used == 0) errors += "Нет фотографий для экспорта"
         if (needing > 0) errors += "Есть фотографии, требующие проверки"
         if (duplicates > 0) errors += "Обнаружены повторяющиеся фотографии"
-        project.photos.filter { it.reviewStatus != ReviewStatus.CAN_DELETE }.forEach { p ->
+        exportable.forEach { p ->
             if (p.analysis == null) errors += "Фото ${p.photoNumber}: нет AI-описания"
             if (!File(p.localPath).exists()) errors += "Фото ${p.photoNumber}: файл отсутствует"
+            val instruction = p.userEditedInstruction ?: p.analysis?.beginnerInstruction.orEmpty()
+            if (instruction.isBlank()) {
+                errors += "Фото ${p.photoNumber}: пустое описание"
+            }
         }
         if (storage.templateFile() == null) errors += "RIN-шаблон не добавлен"
 
@@ -309,7 +316,7 @@ class RinRepository(
             skippedPhotos = skipped,
             duplicatePhotos = duplicates,
             photosNeedingReview = needing,
-            mappingErrors = if (errors.any { it.contains("описания") }) 1 else 0,
+            mappingErrors = errors.count { it.contains("описания") || it.contains("описание") },
             powerpointErrors = 0,
             pdfErrors = 0,
             canExport = errors.isEmpty(),
