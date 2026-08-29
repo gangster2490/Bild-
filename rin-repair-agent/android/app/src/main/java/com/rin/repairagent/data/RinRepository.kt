@@ -97,54 +97,109 @@ class RinRepository(
     fun createCameraTempFile(): File = storage.createCameraTempFile()
 
     suspend fun addPhotoFromUri(project: RepairProject, uri: Uri): RepairProject {
-        return storage.updateProject(project.id) { latest ->
-            val number = (latest.photos.maxOfOrNull { it.photoNumber } ?: 0) + 1
-            val file = storage.savePhotoFromUri(latest.id, uri, number)
-            val photo = ProjectPhoto(
-                id = UUID.randomUUID().toString(),
-                localPath = file.absolutePath,
-                photoNumber = number,
-                reviewStatus = ReviewStatus.NEEDS_REVIEW
-            )
-            latest.copy(photos = latest.photos + photo, reviewCompleted = false, exportReady = false)
+        val latest = storage.loadProject(project.id) ?: project
+        val number = (latest.photos.maxOfOrNull { it.photoNumber } ?: 0) + 1
+        val file = storage.importImageUri(latest.id, uri, number)
+        val photo = ProjectPhoto(
+            id = UUID.randomUUID().toString(),
+            localPath = file.absolutePath,
+            photoNumber = number,
+            reviewStatus = ReviewStatus.NEEDS_REVIEW
+        )
+        return try {
+            storage.updateProject(latest.id) { current ->
+                val finalNumber = (current.photos.maxOfOrNull { it.photoNumber } ?: 0) + 1
+                val finalPhoto = if (finalNumber == number) {
+                    photo
+                } else {
+                    val renamed = storage.newPhotoFile(current.id, finalNumber)
+                    file.copyTo(renamed, overwrite = true)
+                    file.delete()
+                    photo.copy(localPath = renamed.absolutePath, photoNumber = finalNumber)
+                }
+                current.copy(
+                    photos = current.photos + finalPhoto,
+                    reviewCompleted = false,
+                    exportReady = false
+                )
+            }
+        } catch (e: Exception) {
+            file.delete()
+            throw e
         }
     }
 
     suspend fun addPhotoFromCamera(project: RepairProject, cameraFile: File): RepairProject {
-        return storage.updateProject(project.id) { latest ->
-            val number = (latest.photos.maxOfOrNull { it.photoNumber } ?: 0) + 1
-            val file = storage.savePhotoFromCameraFile(latest.id, cameraFile, number)
-            val photo = ProjectPhoto(
-                id = UUID.randomUUID().toString(),
-                localPath = file.absolutePath,
-                photoNumber = number,
-                reviewStatus = ReviewStatus.NEEDS_REVIEW
-            )
-            latest.copy(photos = latest.photos + photo, reviewCompleted = false, exportReady = false)
+        val latest = storage.loadProject(project.id) ?: project
+        val number = (latest.photos.maxOfOrNull { it.photoNumber } ?: 0) + 1
+        val file = storage.importCameraFile(latest.id, cameraFile, number)
+        val photo = ProjectPhoto(
+            id = UUID.randomUUID().toString(),
+            localPath = file.absolutePath,
+            photoNumber = number,
+            reviewStatus = ReviewStatus.NEEDS_REVIEW
+        )
+        return try {
+            storage.updateProject(latest.id) { current ->
+                val finalNumber = (current.photos.maxOfOrNull { it.photoNumber } ?: 0) + 1
+                val finalPhoto = if (finalNumber == number) {
+                    photo
+                } else {
+                    val renamed = storage.newPhotoFile(current.id, finalNumber)
+                    file.copyTo(renamed, overwrite = true)
+                    file.delete()
+                    photo.copy(localPath = renamed.absolutePath, photoNumber = finalNumber)
+                }
+                current.copy(
+                    photos = current.photos + finalPhoto,
+                    reviewCompleted = false,
+                    exportReady = false
+                )
+            }
+        } catch (e: Exception) {
+            file.delete()
+            throw e
         }
     }
 
     suspend fun addPhotosFromZip(project: RepairProject, uri: Uri): RepairProject {
-        return storage.updateProject(project.id) { latest ->
-            val start = (latest.photos.maxOfOrNull { it.photoNumber } ?: 0) + 1
-            val files = storage.importPhotosFromZip(latest.id, uri, start)
-            var number = start
-            val added = files.map { file ->
-                ProjectPhoto(
-                    id = UUID.randomUUID().toString(),
-                    localPath = file.absolutePath,
-                    photoNumber = number++,
-                    reviewStatus = ReviewStatus.NEEDS_REVIEW
+        val latest = storage.loadProject(project.id) ?: project
+        val start = (latest.photos.maxOfOrNull { it.photoNumber } ?: 0) + 1
+        val files = storage.importPhotosFromZip(latest.id, uri, start)
+        return try {
+            storage.updateProject(latest.id) { current ->
+                var number = (current.photos.maxOfOrNull { it.photoNumber } ?: 0) + 1
+                val added = files.map { file ->
+                    var target = file
+                    val expectedPrefix = "photo_%03d_".format(number)
+                    if (!file.name.startsWith(expectedPrefix)) {
+                        val renamed = storage.newPhotoFile(current.id, number)
+                        file.copyTo(renamed, overwrite = true)
+                        file.delete()
+                        target = renamed
+                    }
+                    ProjectPhoto(
+                        id = UUID.randomUUID().toString(),
+                        localPath = target.absolutePath,
+                        photoNumber = number++,
+                        reviewStatus = ReviewStatus.NEEDS_REVIEW
+                    )
+                }
+                current.copy(
+                    photos = current.photos + added,
+                    reviewCompleted = false,
+                    exportReady = false
                 )
             }
-            latest.copy(photos = latest.photos + added, reviewCompleted = false, exportReady = false)
+        } catch (e: Exception) {
+            files.forEach { it.delete() }
+            throw e
         }
     }
 
     suspend fun analyzePhoto(project: RepairProject, photoId: String): RepairProject {
         val apiKey = vault.unlockKey() ?: error("API-ключ не сохранён")
         val provider = vault.getProvider()
-        // Reload latest so analysis does not wipe concurrent photo imports
         val latest = storage.loadProject(project.id) ?: project
         val photo = latest.photos.firstOrNull { it.id == photoId }
             ?: error("Фотография не найдена в проекте")
@@ -190,13 +245,14 @@ class RinRepository(
     }
 
     suspend fun deletePhoto(project: RepairProject, photoId: String): RepairProject {
-        return storage.updateProject(project.id) { latest ->
-            val target = latest.photos.firstOrNull { it.id == photoId }
-            target?.let { File(it.localPath).delete() }
-            val remaining = latest.photos
+        val latest = storage.loadProject(project.id) ?: project
+        val target = latest.photos.firstOrNull { it.id == photoId }
+        target?.let { File(it.localPath).delete() }
+        return storage.updateProject(project.id) { current ->
+            val remaining = current.photos
                 .filterNot { it.id == photoId }
                 .mapIndexed { index, p -> p.copy(photoNumber = index + 1) }
-            latest.copy(photos = remaining, reviewCompleted = false, exportReady = false)
+            current.copy(photos = remaining, reviewCompleted = false, exportReady = false)
         }
     }
 
@@ -214,22 +270,29 @@ class RinRepository(
     }
 
     suspend fun replacePhoto(project: RepairProject, photoId: String, uri: Uri): RepairProject {
-        return storage.updateProject(project.id) { latest ->
-            val photo = latest.photos.first { it.id == photoId }
-            File(photo.localPath).delete()
-            val file = storage.savePhotoFromUri(latest.id, uri, photo.photoNumber)
-            val updated = photo.copy(
-                localPath = file.absolutePath,
-                analysis = null,
-                confirmed = false,
-                reviewStatus = ReviewStatus.NEEDS_REVIEW,
-                userEditedInstruction = null
-            )
-            latest.copy(
-                photos = latest.photos.map { if (it.id == photoId) updated else it },
-                reviewCompleted = false,
-                exportReady = false
-            )
+        val latest = storage.loadProject(project.id) ?: project
+        val photo = latest.photos.first { it.id == photoId }
+        val file = storage.importImageUri(latest.id, uri, photo.photoNumber)
+        return try {
+            storage.updateProject(latest.id) { current ->
+                val existing = current.photos.first { it.id == photoId }
+                File(existing.localPath).delete()
+                val updated = existing.copy(
+                    localPath = file.absolutePath,
+                    analysis = null,
+                    confirmed = false,
+                    reviewStatus = ReviewStatus.NEEDS_REVIEW,
+                    userEditedInstruction = null
+                )
+                current.copy(
+                    photos = current.photos.map { if (it.id == photoId) updated else it },
+                    reviewCompleted = false,
+                    exportReady = false
+                )
+            }
+        } catch (e: Exception) {
+            file.delete()
+            throw e
         }
     }
 

@@ -1,7 +1,6 @@
 package com.rin.repairagent.ui.screens
 
 import android.net.Uri
-import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -37,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.rin.repairagent.data.RinRepository
+import com.rin.repairagent.util.UriIO
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -48,21 +49,37 @@ fun TemplateScreen(repository: RinRepository, onBack: () -> Unit) {
     var message by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(false) }
 
-    val picker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri == null) return@rememberLauncherForActivityResult
+    fun importUri(uri: Uri) {
+        UriIO.tryTakeReadPermission(context, uri)
         scope.launch {
+            loading = true
+            error = null
             try {
-                val name = queryDisplayName(context, uri) ?: "rin_template.pptx"
-                repository.importTemplate(uri, name)
-                message = "Шаблон сохранён: $name"
-                error = null
+                val name = UriIO.displayName(context, uri, "rin_template.pptx")
+                val info = repository.importTemplate(uri, name)
+                message = "Шаблон сохранён: ${info.fileName} (${info.sizeBytes / 1024} КБ)"
             } catch (e: Exception) {
                 error = e.message ?: "Ошибка загрузки шаблона"
+            } finally {
+                loading = false
             }
         }
+    }
+
+    // OpenDocument (SAF) — preferred, persistable grants
+    val openDocument = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) importUri(uri)
+    }
+
+    // GetContent fallback — works on more devices when OpenDocument MIME filter is empty
+    val getContent = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) importUri(uri)
     }
 
     Scaffold(
@@ -104,24 +121,32 @@ fun TemplateScreen(repository: RinRepository, onBack: () -> Unit) {
 
             Button(
                 onClick = {
-                    picker.launch(arrayOf(
-                        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                        "application/zip",
-                        "application/json",
-                        "application/pdf",
-                        "*/*"
-                    ))
+                    // Use */* so OEM document UIs always show files; we validate extension after pick.
+                    openDocument.launch(arrayOf("*/*"))
                 },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !loading
             ) {
                 Text(if (template == null) "Добавить RIN-шаблон" else "Заменить шаблон")
             }
 
+            OutlinedButton(
+                onClick = { getContent.launch("*/*") },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !loading
+            ) { Text("Выбрать файл (альтернативно)") }
+
             if (template != null) {
                 OutlinedButton(
                     onClick = { confirmDelete = true },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !loading
                 ) { Text("Удалить шаблон") }
+            }
+
+            if (loading) {
+                CircularProgressIndicator()
+                Text("Копирование файла во внутреннее хранилище…")
             }
 
             message?.let { Text(it, color = MaterialTheme.colorScheme.secondary) }
@@ -149,12 +174,4 @@ fun TemplateScreen(repository: RinRepository, onBack: () -> Unit) {
             }
         )
     }
-}
-
-fun queryDisplayName(context: android.content.Context, uri: Uri): String? {
-    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-        val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-        if (idx >= 0 && cursor.moveToFirst()) return cursor.getString(idx)
-    }
-    return uri.lastPathSegment
 }

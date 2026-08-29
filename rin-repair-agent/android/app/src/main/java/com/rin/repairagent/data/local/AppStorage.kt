@@ -10,6 +10,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.rin.repairagent.data.model.RepairProject
 import com.rin.repairagent.data.model.TemplateInfo
 import com.rin.repairagent.util.ImageNormalizer
+import com.rin.repairagent.util.UriIO
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -20,7 +21,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
-import java.io.FileOutputStream
+import java.io.FileInputStream
 import java.util.UUID
 import java.util.zip.ZipInputStream
 
@@ -37,7 +38,7 @@ class AppStorage(private val context: Context) {
     private val serverUrlKey = stringPreferencesKey("server_url")
     private val templateMetaKey = stringPreferencesKey("template_meta")
 
-    /** Serializes project read-modify-write to avoid losing photos on concurrent imports. */
+    /** Serializes project.json read-modify-write only (not heavy file I/O). */
     private val projectMutex = Mutex()
 
     val serverUrlFlow: Flow<String> = context.settingsDataStore.data.map { prefs ->
@@ -74,15 +75,36 @@ class AppStorage(private val context: Context) {
     }
 
     suspend fun importTemplate(uri: Uri, displayName: String): TemplateInfo = withContext(Dispatchers.IO) {
-        val ext = displayName.substringAfterLast('.', "pptx").lowercase()
-        require(ext in ALLOWED_TEMPLATE_EXT) { "Недопустимый тип файла: .$ext" }
+        UriIO.tryTakeReadPermission(context, uri)
+        val name = displayName.ifBlank { UriIO.displayName(context, uri, "rin_template.pptx") }
+        val ext = name.substringAfterLast('.', "").lowercase().ifBlank {
+            when (context.contentResolver.getType(uri)) {
+                "application/pdf" -> "pdf"
+                "application/json" -> "json"
+                "application/zip", "application/x-zip-compressed" -> "zip"
+                else -> "pptx"
+            }
+        }
+        require(ext in ALLOWED_TEMPLATE_EXT) {
+            "Недопустимый тип файла: .$ext (нужен PPTX, ZIP, JSON или PDF)"
+        }
+
         val dest = templatesDir.resolve("rin_template.$ext")
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            FileOutputStream(dest).use { output -> input.copyTo(output) }
-        } ?: error("Не удалось открыть файл шаблона")
+        val tmp = File(templatesDir, "rin_template_download.tmp")
+        try {
+            UriIO.copyUriToFile(context, uri, tmp)
+            require(tmp.length() > 0L) { "Загруженный шаблон пустой" }
+            if (dest.exists()) dest.delete()
+            if (!tmp.renameTo(dest)) {
+                tmp.copyTo(dest, overwrite = true)
+                tmp.delete()
+            }
+        } finally {
+            if (tmp.exists()) tmp.delete()
+        }
 
         val info = TemplateInfo(
-            fileName = displayName,
+            fileName = name,
             storedPath = dest.absolutePath,
             sizeBytes = dest.length(),
             addedAt = System.currentTimeMillis()
@@ -100,8 +122,8 @@ class AppStorage(private val context: Context) {
 
     fun templateFile(): File? {
         val pptx = templatesDir.resolve("rin_template.pptx")
-        if (pptx.exists()) return pptx
-        return templatesDir.listFiles()?.firstOrNull()
+        if (pptx.exists() && pptx.length() > 0L) return pptx
+        return templatesDir.listFiles()?.firstOrNull { it.isFile && it.length() > 0L }
     }
 
     suspend fun listProjects(): List<RepairProject> = withContext(Dispatchers.IO) {
@@ -124,18 +146,15 @@ class AppStorage(private val context: Context) {
 
     suspend fun saveProject(project: RepairProject): RepairProject = projectMutex.withLock {
         withContext(Dispatchers.IO) {
-            val updated = project.copy(updatedAt = System.currentTimeMillis())
-            val dir = File(projectsDir, updated.id).also { it.mkdirs() }
-            File(dir, "project.json").writeText(json.encodeToString(updated))
-            updated
+            writeProjectUnlocked(project)
         }
     }
 
     /**
-     * Atomically reload project from disk, apply [transform], save.
-     * Prevents concurrent gallery/camera/ZIP imports from overwriting each other.
+     * Atomically reload project.json, apply [transform], save.
+     * Keep [transform] lightweight — do heavy URI/ZIP I/O outside this call.
      */
-    suspend fun updateProject(projectId: String, transform: suspend (RepairProject) -> RepairProject): RepairProject =
+    suspend fun updateProject(projectId: String, transform: (RepairProject) -> RepairProject): RepairProject =
         projectMutex.withLock {
             withContext(Dispatchers.IO) {
                 val meta = File(projectsDir, "$projectId/project.json")
@@ -147,6 +166,13 @@ class AppStorage(private val context: Context) {
             }
         }
 
+    private fun writeProjectUnlocked(project: RepairProject): RepairProject {
+        val updated = project.copy(updatedAt = System.currentTimeMillis())
+        val dir = File(projectsDir, updated.id).also { it.mkdirs() }
+        File(dir, "project.json").writeText(json.encodeToString(updated))
+        return updated
+    }
+
     suspend fun deleteProject(id: String) = withContext(Dispatchers.IO) {
         File(projectsDir, id).deleteRecursively()
         File(exportsDir, id).deleteRecursively()
@@ -155,18 +181,20 @@ class AppStorage(private val context: Context) {
     fun projectPhotosDir(projectId: String): File =
         File(projectsDir, "$projectId/photos").also { it.mkdirs() }
 
-    private fun newPhotoFile(projectId: String, photoNumber: Int): File {
+    fun newPhotoFile(projectId: String, photoNumber: Int): File {
         val unique = UUID.randomUUID().toString().take(8)
         return File(projectPhotosDir(projectId), "photo_%03d_%s.jpg".format(photoNumber, unique))
     }
 
-    suspend fun savePhotoFromUri(projectId: String, uri: Uri, photoNumber: Int): File =
+    /** Normalize a content URI image into a JPEG under the project photos folder. */
+    suspend fun importImageUri(projectId: String, uri: Uri, photoNumber: Int): File =
         withContext(Dispatchers.IO) {
+            UriIO.tryTakeReadPermission(context, uri)
             val dest = newPhotoFile(projectId, photoNumber)
             ImageNormalizer.saveUriAsJpeg(context, uri, dest)
         }
 
-    suspend fun savePhotoFromCameraFile(projectId: String, cameraFile: File, photoNumber: Int): File =
+    suspend fun importCameraFile(projectId: String, cameraFile: File, photoNumber: Int): File =
         withContext(Dispatchers.IO) {
             require(cameraFile.exists() && cameraFile.length() > 0L) {
                 "Снимок с камеры не получен. Попробуйте ещё раз."
@@ -175,59 +203,65 @@ class AppStorage(private val context: Context) {
             ImageNormalizer.saveFileAsJpeg(cameraFile, dest)
         }
 
+    /**
+     * Copy ZIP to local cache first (ContentResolver streams break ZipInputStream),
+     * then extract and normalize each image.
+     */
     suspend fun importPhotosFromZip(projectId: String, uri: Uri, startNumber: Int): List<File> =
         withContext(Dispatchers.IO) {
-            val entries = mutableListOf<Pair<String, ByteArray>>()
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                ZipInputStream(input).use { zis ->
-                    var entry = zis.nextEntry
-                    while (entry != null) {
-                        val rawName = entry.name.replace('\\', '/')
-                        val baseName = rawName.substringAfterLast('/')
-                        val lower = rawName.lowercase()
-                        val isImage = !entry.isDirectory &&
-                            baseName.isNotBlank() &&
-                            !lower.contains("__macosx") &&
-                            !baseName.startsWith(".") &&
-                            IMAGE_EXT.any { lower.endsWith(it) }
-                        // Zip-slip protection: reject absolute / parent paths
-                        val safe = !rawName.contains("..") && !rawName.startsWith("/")
-                        if (isImage && safe) {
-                            val bytes = zis.readBytes()
-                            if (bytes.isNotEmpty()) {
-                                entries += baseName to bytes
+            UriIO.tryTakeReadPermission(context, uri)
+            val zipLocal = UriIO.copyUriToCache(context, uri, "photos", ".zip")
+            try {
+                require(zipLocal.length() > 0L) { "ZIP-файл пустой" }
+                val entries = mutableListOf<Pair<String, ByteArray>>()
+                FileInputStream(zipLocal).use { fis ->
+                    ZipInputStream(fis).use { zis ->
+                        var entry = zis.nextEntry
+                        while (entry != null) {
+                            val rawName = entry.name.replace('\\', '/')
+                            val baseName = rawName.substringAfterLast('/')
+                            val lower = rawName.lowercase()
+                            val isImage = !entry.isDirectory &&
+                                baseName.isNotBlank() &&
+                                !lower.contains("__macosx") &&
+                                !baseName.startsWith(".") &&
+                                IMAGE_EXT.any { lower.endsWith(it) }
+                            val safe = !rawName.contains("..") && !rawName.startsWith("/")
+                            if (isImage && safe) {
+                                val bytes = zis.readBytes()
+                                if (bytes.isNotEmpty()) entries += baseName to bytes
                             }
+                            zis.closeEntry()
+                            entry = zis.nextEntry
                         }
-                        zis.closeEntry()
-                        entry = zis.nextEntry
                     }
                 }
-            } ?: error("Не удалось открыть ZIP")
 
-            require(entries.isNotEmpty()) {
-                "В ZIP не найдены изображения (JPEG, PNG, WebP)"
-            }
-
-            // Stable order by file name so photo numbers match user expectation
-            entries.sortBy { it.first.lowercase() }
-
-            var number = startNumber
-            val out = mutableListOf<File>()
-            val errors = mutableListOf<String>()
-            for ((name, bytes) in entries) {
-                try {
-                    val dest = newPhotoFile(projectId, number)
-                    ImageNormalizer.saveBytesAsJpeg(bytes, dest)
-                    out += dest
-                    number++
-                } catch (e: Exception) {
-                    errors += "$name: ${e.message ?: "ошибка"}"
+                require(entries.isNotEmpty()) {
+                    "В ZIP не найдены изображения (JPEG, PNG, WebP, HEIC)"
                 }
+                entries.sortBy { it.first.lowercase() }
+
+                var number = startNumber
+                val out = mutableListOf<File>()
+                val errors = mutableListOf<String>()
+                for ((name, bytes) in entries) {
+                    try {
+                        val dest = newPhotoFile(projectId, number)
+                        ImageNormalizer.saveBytesAsJpeg(bytes, dest)
+                        out += dest
+                        number++
+                    } catch (e: Exception) {
+                        errors += "$name: ${e.message ?: "ошибка"}"
+                    }
+                }
+                require(out.isNotEmpty()) {
+                    "Не удалось импортировать изображения из ZIP. " + errors.joinToString("; ")
+                }
+                out
+            } finally {
+                zipLocal.delete()
             }
-            require(out.isNotEmpty()) {
-                "Не удалось импортировать изображения из ZIP. " + errors.joinToString("; ")
-            }
-            out
         }
 
     fun createCameraTempFile(): File {

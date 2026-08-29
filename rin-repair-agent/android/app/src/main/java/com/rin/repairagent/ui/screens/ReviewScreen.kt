@@ -37,11 +37,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.rin.repairagent.data.RinRepository
 import com.rin.repairagent.data.model.RepairProject
 import com.rin.repairagent.data.model.ReviewStatus
+import com.rin.repairagent.util.UriIO
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -58,6 +60,7 @@ fun ReviewScreen(
     var busy by remember { mutableStateOf(false) }
     var replaceTargetId by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     LaunchedEffect(projectId) {
         project = repository.loadProject(projectId)
@@ -67,6 +70,7 @@ fun ReviewScreen(
         ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
+        UriIO.tryTakeReadPermission(context, uri)
         val id = projectId
         scope.launch {
             busy = true
@@ -93,6 +97,7 @@ fun ReviewScreen(
         val target = replaceTargetId
         replaceTargetId = null
         if (uri == null || target == null) return@rememberLauncherForActivityResult
+        UriIO.tryTakeReadPermission(context, uri)
         val id = projectId
         scope.launch {
             busy = true
