@@ -1,7 +1,6 @@
 package com.rin.repairagent.ui.screens
 
 import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -70,123 +69,78 @@ fun NewRepairScreen(
     var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var analyzing by remember { mutableStateOf(false) }
-    var importing by remember { mutableStateOf(false) }
     var cameraFile by remember { mutableStateOf<File?>(null) }
 
-    suspend fun ensureProjectReady(): RepairProject {
-        project?.id?.let { id ->
-            repository.loadProject(id)?.let { loaded ->
-                project = loaded
-                return loaded
+    fun ensureProject(onReady: suspend (RepairProject) -> Unit) {
+        scope.launch {
+            try {
+                error = null
+                val current = project ?: run {
+                    if (title.isBlank() || model.isBlank()) {
+                        error = "Укажите название ремонта и изделие/модель"
+                        return@launch
+                    }
+                    repository.createProject(title, model, serial, language).also { project = it }
+                }
+                onReady(current)
+            } catch (e: Exception) {
+                error = e.message
             }
         }
-        if (title.isBlank() || model.isBlank()) {
-            error("Укажите название ремонта и изделие/модель")
-        }
-        val created = repository.createProject(title, model, serial, language)
-        project = created
-        return created
     }
 
-    fun analyzeNewPhotos(projectId: String, newIds: List<String>) {
-        if (newIds.isEmpty()) return
+    fun afterPhotoAdded(updated: RepairProject, newIds: List<String>) {
+        project = updated
         scope.launch {
             analyzing = true
             try {
+                var current = updated
                 for (id in newIds) {
                     status = "AI анализирует фото…"
-                    val current = repository.analyzePhoto(
-                        repository.loadProject(projectId) ?: return@launch,
-                        id
-                    )
+                    current = repository.analyzePhoto(current, id)
                     project = current
                     val photo = current.photos.first { it.id == id }
                     val a = photo.analysis
-                    val warning = a?.importantWarning?.takeIf { it.isNotBlank() }
-                    status = buildString {
-                        append("Фото ${photo.photoNumber}\n")
-                        append("Описание: ${a?.beginnerInstruction.orEmpty()}\n")
-                        append("Уверенность: ${((a?.confidence ?: 0.0) * 100).toInt()}%")
-                        if (!warning.isNullOrBlank()) append("\nПредупреждение: $warning")
-                        if (a?.needsManualReview == true || (a?.confidence ?: 0.0) < 0.55) {
-                            append("\n⚠ Требует проверки")
-                        }
+                    status = "Фото ${photo.photoNumber}: ${a?.visibleAction ?: ""}\n" +
+                        "Уверенность: ${((a?.confidence ?: 0.0) * 100).toInt()}%\n" +
+                        (a?.beginnerInstruction ?: "")
+                    if (a?.needsManualReview == true || (a?.confidence ?: 0.0) < 0.55) {
+                        status = (status ?: "") + "\n⚠ Требует проверки"
                     }
                 }
             } catch (e: Exception) {
-                // Photos stay saved locally even if AI fails
-                project = repository.loadProject(projectId) ?: project
-                error = "Фотографии сохранены. Анализ можно повторить позже: ${e.message}"
+                error = "Анализ сохранён локально. Ошибка сети/AI: ${e.message}"
             } finally {
                 analyzing = false
             }
         }
     }
 
-    fun importUris(uris: List<Uri>) {
-        if (uris.isEmpty()) return
-        scope.launch {
-            importing = true
-            error = null
-            try {
-                var current = ensureProjectReady()
-                val ids = mutableListOf<String>()
-                uris.forEach { uri ->
-                    status = "Сохранение фотографии…"
-                    val before = current.photos.map { it.id }.toSet()
-                    current = repository.addPhotoFromUri(current, uri)
-                    project = current
-                    ids += current.photos.map { it.id }.filterNot { it in before }
-                }
-                status = "Загружено фото: ${ids.size}"
-                analyzeNewPhotos(current.id, ids)
-            } catch (e: Exception) {
-                error = e.message ?: "Не удалось сохранить фотографии"
-                project = project?.id?.let { repository.loadProject(it) } ?: project
-            } finally {
-                importing = false
-            }
-        }
-    }
-
     val galleryPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia()
-    ) { uris -> importUris(uris) }
+    ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        ensureProject { p ->
+            var current = p
+            val ids = mutableListOf<String>()
+            uris.forEach { uri ->
+                val before = current.photos.map { it.id }.toSet()
+                current = repository.addPhotoFromUri(current, uri)
+                ids += current.photos.map { it.id }.filterNot { it in before }
+            }
+            afterPhotoAdded(current, ids)
+        }
+    }
 
     val zipPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        try {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-        } catch (_: SecurityException) {
-            // Some providers do not support persistable permissions; we copy immediately anyway.
-        }
-        scope.launch {
-            importing = true
-            error = null
-            try {
-                var current = ensureProjectReady()
-                status = "Импорт ZIP…"
-                val before = current.photos.map { it.id }.toSet()
-                current = repository.addPhotosFromZip(current, uri)
-                project = current
-                val ids = current.photos.map { it.id }.filterNot { it in before }
-                if (ids.isEmpty()) {
-                    error = "В ZIP не найдены подходящие изображения"
-                } else {
-                    status = "Из ZIP загружено фото: ${ids.size}"
-                    analyzeNewPhotos(current.id, ids)
-                }
-            } catch (e: Exception) {
-                error = e.message ?: "Не удалось импортировать ZIP"
-                project = project?.id?.let { repository.loadProject(it) } ?: project
-            } finally {
-                importing = false
-            }
+        ensureProject { p ->
+            val before = p.photos.map { it.id }.toSet()
+            val updated = repository.addPhotosFromZip(p, uri)
+            val ids = updated.photos.map { it.id }.filterNot { it in before }
+            afterPhotoAdded(updated, ids)
         }
     }
 
@@ -194,45 +148,13 @@ fun NewRepairScreen(
         ActivityResultContracts.TakePicture()
     ) { success ->
         val file = cameraFile
-        if (!success || file == null) {
-            error = "Съёмка отменена"
-            return@rememberLauncherForActivityResult
+        if (!success || file == null || !file.exists()) return@rememberLauncherForActivityResult
+        ensureProject { p ->
+            val before = p.photos.map { it.id }.toSet()
+            val updated = repository.addPhotoFromCamera(p, file)
+            val ids = updated.photos.map { it.id }.filterNot { it in before }
+            afterPhotoAdded(updated, ids)
         }
-        if (!file.exists() || file.length() == 0L) {
-            error = "Файл снимка пустой. Попробуйте ещё раз."
-            return@rememberLauncherForActivityResult
-        }
-        scope.launch {
-            importing = true
-            error = null
-            try {
-                var current = ensureProjectReady()
-                status = "Сохранение снимка…"
-                val before = current.photos.map { it.id }.toSet()
-                current = repository.addPhotoFromCamera(current, file)
-                project = current
-                val ids = current.photos.map { it.id }.filterNot { it in before }
-                status = "Снимок сохранён"
-                analyzeNewPhotos(current.id, ids)
-            } catch (e: Exception) {
-                error = e.message ?: "Не удалось сохранить снимок"
-                project = project?.id?.let { repository.loadProject(it) } ?: project
-            } finally {
-                importing = false
-                file.delete()
-            }
-        }
-    }
-
-    fun launchCamera() {
-        val file = repository.createCameraTempFile()
-        cameraFile = file
-        val uri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            file
-        )
-        takePicture.launch(uri)
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -242,10 +164,15 @@ fun NewRepairScreen(
             error = "Нужно разрешение камеры"
             return@rememberLauncherForActivityResult
         }
-        launchCamera()
+        val file = repository.createCameraTempFile()
+        cameraFile = file
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file
+        )
+        takePicture.launch(uri)
     }
-
-    val busy = analyzing || importing
 
     Scaffold(
         topBar = {
@@ -311,10 +238,21 @@ fun NewRepairScreen(
                     val granted = ContextCompat.checkSelfPermission(
                         context, Manifest.permission.CAMERA
                     ) == PackageManager.PERMISSION_GRANTED
-                    if (granted) launchCamera() else permissionLauncher.launch(Manifest.permission.CAMERA)
+                    if (granted) {
+                        val file = repository.createCameraTempFile()
+                        cameraFile = file
+                        val uri = FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.fileprovider",
+                            file
+                        )
+                        takePicture.launch(uri)
+                    } else {
+                        permissionLauncher.launch(Manifest.permission.CAMERA)
+                    }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !busy
+                enabled = !analyzing
             ) { Text("Сделать фото камерой") }
 
             Button(
@@ -324,23 +262,23 @@ fun NewRepairScreen(
                     )
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !busy
+                enabled = !analyzing
             ) { Text("Выбрать из галереи") }
 
             OutlinedButton(
-                onClick = { zipPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*")) },
+                onClick = { zipPicker.launch(arrayOf("application/zip", "*/*")) },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !busy
+                enabled = !analyzing
             ) { Text("Загрузить ZIP") }
 
             project?.let { p ->
                 Text("Фотографий: ${p.photos.size}")
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(p.photos.sortedBy { it.photoNumber }, key = { it.id }) { photo ->
+                    items(p.photos, key = { it.id }) { photo ->
                         Column(modifier = Modifier.width(120.dp)) {
                             AsyncImage(
                                 model = File(photo.localPath),
-                                contentDescription = "Фото ${photo.photoNumber}",
+                                contentDescription = null,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(90.dp),
@@ -352,18 +290,15 @@ fun NewRepairScreen(
                                     "${(a.confidence * 100).toInt()}%",
                                     style = MaterialTheme.typography.bodyMedium
                                 )
-                            } ?: Text("ожидание…", style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     }
                 }
             }
 
-            if (busy) {
+            if (analyzing) {
                 CircularProgressIndicator()
-                Text(
-                    if (importing) "Сохранение фотографий…"
-                    else "Анализ фотографий… Данные сохраняются локально."
-                )
+                Text("Анализ фотографий… Данные сохраняются локально.")
             }
 
             status?.let { Text(it) }
@@ -373,7 +308,7 @@ fun NewRepairScreen(
                 Button(
                     onClick = { onOpenReview(p.id) },
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = p.photos.isNotEmpty() && !busy
+                    enabled = p.photos.isNotEmpty() && !analyzing
                 ) { Text("Перейти к проверке") }
             }
         }

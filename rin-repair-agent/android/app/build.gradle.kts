@@ -83,7 +83,6 @@ dependencies {
 
     // Photo picker / media
     implementation("androidx.activity:activity-ktx:1.9.0")
-    implementation("androidx.exifinterface:exifinterface:1.3.7")
 
     // Networking
     implementation("com.squareup.retrofit2:retrofit:2.11.0")

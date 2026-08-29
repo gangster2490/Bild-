@@ -97,59 +97,50 @@ class RinRepository(
     fun createCameraTempFile(): File = storage.createCameraTempFile()
 
     suspend fun addPhotoFromUri(project: RepairProject, uri: Uri): RepairProject {
-        return storage.updateProject(project.id) { latest ->
-            val number = (latest.photos.maxOfOrNull { it.photoNumber } ?: 0) + 1
-            val file = storage.savePhotoFromUri(latest.id, uri, number)
-            val photo = ProjectPhoto(
-                id = UUID.randomUUID().toString(),
-                localPath = file.absolutePath,
-                photoNumber = number,
-                reviewStatus = ReviewStatus.NEEDS_REVIEW
-            )
-            latest.copy(photos = latest.photos + photo, reviewCompleted = false, exportReady = false)
-        }
+        val number = (project.photos.maxOfOrNull { it.photoNumber } ?: 0) + 1
+        val file = storage.savePhotoFromUri(project.id, uri, number)
+        val photo = ProjectPhoto(
+            id = UUID.randomUUID().toString(),
+            localPath = file.absolutePath,
+            photoNumber = number,
+            reviewStatus = ReviewStatus.NEEDS_REVIEW
+        )
+        return storage.saveProject(project.copy(photos = project.photos + photo))
     }
 
     suspend fun addPhotoFromCamera(project: RepairProject, cameraFile: File): RepairProject {
-        return storage.updateProject(project.id) { latest ->
-            val number = (latest.photos.maxOfOrNull { it.photoNumber } ?: 0) + 1
-            val file = storage.savePhotoFromCameraFile(latest.id, cameraFile, number)
-            val photo = ProjectPhoto(
-                id = UUID.randomUUID().toString(),
-                localPath = file.absolutePath,
-                photoNumber = number,
-                reviewStatus = ReviewStatus.NEEDS_REVIEW
-            )
-            latest.copy(photos = latest.photos + photo, reviewCompleted = false, exportReady = false)
-        }
+        val number = (project.photos.maxOfOrNull { it.photoNumber } ?: 0) + 1
+        val file = storage.savePhotoFromCameraFile(project.id, cameraFile, number)
+        val photo = ProjectPhoto(
+            id = UUID.randomUUID().toString(),
+            localPath = file.absolutePath,
+            photoNumber = number,
+            reviewStatus = ReviewStatus.NEEDS_REVIEW
+        )
+        return storage.saveProject(project.copy(photos = project.photos + photo))
     }
 
     suspend fun addPhotosFromZip(project: RepairProject, uri: Uri): RepairProject {
-        return storage.updateProject(project.id) { latest ->
-            val start = (latest.photos.maxOfOrNull { it.photoNumber } ?: 0) + 1
-            val files = storage.importPhotosFromZip(latest.id, uri, start)
-            var number = start
-            val added = files.map { file ->
-                ProjectPhoto(
-                    id = UUID.randomUUID().toString(),
-                    localPath = file.absolutePath,
-                    photoNumber = number++,
-                    reviewStatus = ReviewStatus.NEEDS_REVIEW
-                )
-            }
-            latest.copy(photos = latest.photos + added, reviewCompleted = false, exportReady = false)
+        val start = (project.photos.maxOfOrNull { it.photoNumber } ?: 0) + 1
+        val files = storage.importPhotosFromZip(project.id, uri, start)
+        var number = start
+        val added = files.map { file ->
+            ProjectPhoto(
+                id = UUID.randomUUID().toString(),
+                localPath = file.absolutePath,
+                photoNumber = number++,
+                reviewStatus = ReviewStatus.NEEDS_REVIEW
+            )
         }
+        return storage.saveProject(project.copy(photos = project.photos + added))
     }
 
     suspend fun analyzePhoto(project: RepairProject, photoId: String): RepairProject {
         val apiKey = vault.unlockKey() ?: error("API-ключ не сохранён")
         val provider = vault.getProvider()
-        // Reload latest so analysis does not wipe concurrent photo imports
-        val latest = storage.loadProject(project.id) ?: project
-        val photo = latest.photos.firstOrNull { it.id == photoId }
-            ?: error("Фотография не найдена в проекте")
+        val photo = project.photos.first { it.id == photoId }
         val file = File(photo.localPath)
-        require(file.exists() && file.length() > 0L) { "Файл фотографии не найден или пустой" }
+        require(file.exists()) { "Файл фотографии не найден" }
 
         val body = file.asRequestBody("image/jpeg".toMediaType())
         val part = MultipartBody.Part.createFormData("image", file.name, body)
@@ -160,77 +151,57 @@ class RinRepository(
             provider = text(provider),
             apiKey = text(apiKey),
             photoNumber = text(photo.photoNumber.toString()),
-            projectTitle = text(latest.title),
-            productModel = text(latest.productModel),
-            language = text(latest.language.name)
+            projectTitle = text(project.title),
+            productModel = text(project.productModel),
+            language = text(project.language.name)
         )
 
         val analysis = response.analysis.copy(photoNumber = photo.photoNumber)
         val status = when {
             analysis.needsManualReview || analysis.confidence < 0.55 -> ReviewStatus.UNCLEAR
+            analysis.confidence < 0.75 -> ReviewStatus.NEEDS_REVIEW
             else -> ReviewStatus.NEEDS_REVIEW
         }
-
-        return storage.updateProject(latest.id) { current ->
-            val updatedPhotos = current.photos.map {
-                if (it.id == photoId) {
-                    it.copy(analysis = analysis, reviewStatus = status, confirmed = false)
-                } else {
-                    it
-                }
-            }
-            current.copy(photos = updatedPhotos, reviewCompleted = false)
+        val updatedPhotos = project.photos.map {
+            if (it.id == photoId) it.copy(analysis = analysis, reviewStatus = status, confirmed = false)
+            else it
         }
+        return storage.saveProject(project.copy(photos = updatedPhotos))
     }
 
     suspend fun updatePhoto(project: RepairProject, photo: ProjectPhoto): RepairProject {
-        return storage.updateProject(project.id) { latest ->
-            latest.copy(photos = latest.photos.map { if (it.id == photo.id) photo else it })
-        }
+        val photos = project.photos.map { if (it.id == photo.id) photo else it }
+        return storage.saveProject(project.copy(photos = photos))
     }
 
     suspend fun deletePhoto(project: RepairProject, photoId: String): RepairProject {
-        return storage.updateProject(project.id) { latest ->
-            val target = latest.photos.firstOrNull { it.id == photoId }
-            target?.let { File(it.localPath).delete() }
-            val remaining = latest.photos
-                .filterNot { it.id == photoId }
-                .mapIndexed { index, p -> p.copy(photoNumber = index + 1) }
-            latest.copy(photos = remaining, reviewCompleted = false, exportReady = false)
-        }
+        val target = project.photos.firstOrNull { it.id == photoId }
+        target?.let { File(it.localPath).delete() }
+        val remaining = project.photos
+            .filterNot { it.id == photoId }
+            .mapIndexed { index, p -> p.copy(photoNumber = index + 1) }
+        return storage.saveProject(project.copy(photos = remaining, reviewCompleted = false))
     }
 
     suspend fun reorderPhotos(project: RepairProject, from: Int, to: Int): RepairProject {
-        return storage.updateProject(project.id) { latest ->
-            if (from == to || from !in latest.photos.indices || to !in latest.photos.indices) {
-                return@updateProject latest
-            }
-            val list = latest.photos.toMutableList()
-            val item = list.removeAt(from)
-            list.add(to, item)
-            val renumbered = list.mapIndexed { index, p -> p.copy(photoNumber = index + 1) }
-            latest.copy(photos = renumbered, reviewCompleted = false)
-        }
+        if (from == to || from !in project.photos.indices || to !in project.photos.indices) return project
+        val list = project.photos.toMutableList()
+        val item = list.removeAt(from)
+        list.add(to, item)
+        val renumbered = list.mapIndexed { index, p -> p.copy(photoNumber = index + 1) }
+        return storage.saveProject(project.copy(photos = renumbered))
     }
 
     suspend fun replacePhoto(project: RepairProject, photoId: String, uri: Uri): RepairProject {
-        return storage.updateProject(project.id) { latest ->
-            val photo = latest.photos.first { it.id == photoId }
-            File(photo.localPath).delete()
-            val file = storage.savePhotoFromUri(latest.id, uri, photo.photoNumber)
-            val updated = photo.copy(
-                localPath = file.absolutePath,
-                analysis = null,
-                confirmed = false,
-                reviewStatus = ReviewStatus.NEEDS_REVIEW,
-                userEditedInstruction = null
-            )
-            latest.copy(
-                photos = latest.photos.map { if (it.id == photoId) updated else it },
-                reviewCompleted = false,
-                exportReady = false
-            )
-        }
+        val photo = project.photos.first { it.id == photoId }
+        val file = storage.savePhotoFromUri(project.id, uri, photo.photoNumber)
+        val updated = photo.copy(
+            localPath = file.absolutePath,
+            analysis = null,
+            confirmed = false,
+            reviewStatus = ReviewStatus.NEEDS_REVIEW
+        )
+        return updatePhoto(project, updated)
     }
 
     fun validateForExport(project: RepairProject): ExportValidation {
