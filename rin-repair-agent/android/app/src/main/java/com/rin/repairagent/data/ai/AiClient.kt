@@ -8,14 +8,9 @@ import com.rin.repairagent.data.model.PhotoAnalysis
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -32,10 +27,11 @@ import kotlin.random.Random
 /**
  * Calls OpenAI / Gemini directly from the device. No app backend required.
  * API keys must never be logged. HTTP 429 is retried with backoff.
+ * Analysis results are always normalized into valid JSON via [AnalysisJson].
  */
 class AiClient(private val context: Context) {
 
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val json = AnalysisJson.json
 
     private val http = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
@@ -64,13 +60,30 @@ class AiClient(private val context: Context) {
         productModel: String
     ): PhotoAnalysis = withContext(Dispatchers.IO) {
         require(imageFile.exists() && imageFile.length() > 0L) { "Файл фотографии пустой" }
-        val prompt = loadPrompt(projectTitle, productModel, photoNumber)
+        val systemPrompt = loadSystemPrompt()
+        val userPrompt = loadUserPrompt(projectTitle, productModel, photoNumber)
         val b64 = Base64.encodeToString(imageFile.readBytes(), Base64.NO_WRAP)
         val raw = when (provider) {
-            AiProvider.OPENAI -> analyzeOpenAi(apiKey.trim(), prompt, b64)
-            AiProvider.GEMINI -> analyzeGemini(apiKey.trim(), prompt, b64)
+            AiProvider.OPENAI -> analyzeOpenAi(apiKey.trim(), systemPrompt, userPrompt, b64)
+            AiProvider.GEMINI -> analyzeGemini(apiKey.trim(), systemPrompt, userPrompt, b64)
         }
-        normalize(extractJsonObject(raw), photoNumber)
+        // Internal result is always a PhotoAnalysis that encodes to valid JSON.
+        AnalysisJson.parseAiResult(raw, photoNumber)
+    }
+
+    /** Same as [analyzePhoto], but returns the canonical JSON string. */
+    suspend fun analyzePhotoJson(
+        apiKey: String,
+        provider: AiProvider,
+        imageFile: File,
+        photoNumber: Int,
+        projectTitle: String,
+        productModel: String
+    ): String {
+        val analysis = analyzePhoto(
+            apiKey, provider, imageFile, photoNumber, projectTitle, productModel
+        )
+        return AnalysisJson.encode(analysis)
     }
 
     private fun checkOpenAi(apiKey: String): ApiKeyCheckResponse {
@@ -110,18 +123,27 @@ class AiClient(private val context: Context) {
         }
     }
 
-    private suspend fun analyzeOpenAi(apiKey: String, prompt: String, b64: String): String {
+    private suspend fun analyzeOpenAi(
+        apiKey: String,
+        systemPrompt: String,
+        userPrompt: String,
+        b64: String
+    ): String {
         val body = buildJsonObject {
             put("model", "gpt-4o-mini")
             put("temperature", 0.2)
             put("response_format", buildJsonObject { put("type", "json_object") })
             put("messages", buildJsonArray {
                 add(buildJsonObject {
+                    put("role", "system")
+                    put("content", systemPrompt)
+                })
+                add(buildJsonObject {
                     put("role", "user")
                     put("content", buildJsonArray {
                         add(buildJsonObject {
                             put("type", "text")
-                            put("text", prompt)
+                            put("text", userPrompt)
                         })
                         add(buildJsonObject {
                             put("type", "image_url")
@@ -157,12 +179,25 @@ class AiClient(private val context: Context) {
             ?: error("Пустой ответ OpenAI")
     }
 
-    private suspend fun analyzeGemini(apiKey: String, prompt: String, b64: String): String {
+    private suspend fun analyzeGemini(
+        apiKey: String,
+        systemPrompt: String,
+        userPrompt: String,
+        b64: String
+    ): String {
         val body = buildJsonObject {
+            put(
+                "system_instruction",
+                buildJsonObject {
+                    put("parts", buildJsonArray {
+                        add(buildJsonObject { put("text", systemPrompt) })
+                    })
+                }
+            )
             put("contents", buildJsonArray {
                 add(buildJsonObject {
                     put("parts", buildJsonArray {
-                        add(buildJsonObject { put("text", prompt) })
+                        add(buildJsonObject { put("text", userPrompt) })
                         add(buildJsonObject {
                             put(
                                 "inline_data",
@@ -210,10 +245,6 @@ class AiClient(private val context: Context) {
 
     private data class HttpText(val code: Int, val body: String, val retryAfterSeconds: Long?)
 
-    /**
-     * Retries on HTTP 429 (and transient 503) with exponential backoff + jitter.
-     * Honours Retry-After when present.
-     */
     private suspend fun executeWithRateLimitRetry(
         providerLabel: String,
         request: Request,
@@ -248,7 +279,18 @@ class AiClient(private val context: Context) {
         }
     }
 
-    private fun loadPrompt(title: String, model: String, photoNumber: Int): String {
+    private fun loadSystemPrompt(): String {
+        val fromAssets = runCatching {
+            context.assets.open("prompts/system_prompt.txt").bufferedReader().use { it.readText() }
+        }.getOrNull()?.trim().orEmpty()
+        return if (fromAssets.isNotBlank()) {
+            fromAssets
+        } else {
+            "You are the RIN Repair Instruction Agent. ${AnalysisJson.JSON_ONLY_SYSTEM_SUFFIX}"
+        }
+    }
+
+    private fun loadUserPrompt(title: String, model: String, photoNumber: Int): String {
         val raw = context.assets.open("prompts/analyze_photo.txt").bufferedReader().use { it.readText() }
         return raw
             .replace("{{title}}", title)
@@ -256,60 +298,15 @@ class AiClient(private val context: Context) {
             .replace("{{photoNumber}}", photoNumber.toString())
     }
 
-    private fun extractJsonObject(text: String): JsonObject {
-        val cleaned = text.replace("```json", "", ignoreCase = true).replace("```", "").trim()
-        val start = cleaned.indexOf('{')
-        val end = cleaned.lastIndexOf('}')
-        require(start >= 0 && end > start) { "AI не вернул JSON" }
-        return json.parseToJsonElement(cleaned.substring(start, end + 1)).jsonObject
-    }
-
-    private fun normalize(obj: JsonObject, photoNumber: Int): PhotoAnalysis {
-        fun str(key: String, default: String = "") =
-            obj[key]?.jsonPrimitive?.contentOrNull?.trim() ?: default
-
-        fun list(key: String): List<String> =
-            (obj[key] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim() }
-                ?.filter { it.isNotEmpty() }
-                ?: emptyList()
-
-        val confidence = (obj["confidence"]?.jsonPrimitive?.doubleOrNull ?: 0.0).coerceIn(0.0, 1.0)
-        var needsReview = obj["needsManualReview"]?.jsonPrimitive?.booleanOrNull == true || confidence < 0.55
-        var instruction = str("beginnerInstruction")
-        if (instruction.isBlank() || (needsReview && confidence < 0.4)) {
-            instruction = instruction.ifBlank {
-                "Точное действие по этой фотографии определить невозможно. Требуется проверка мастером."
-            }
-            needsReview = true
-        }
-        return PhotoAnalysis(
-            photoNumber = obj["photoNumber"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: photoNumber,
-            visibleObjects = list("visibleObjects"),
-            visibleAction = str("visibleAction"),
-            repairStage = str("repairStage"),
-            tools = list("tools"),
-            beginnerInstruction = instruction,
-            importantWarning = str("importantWarning", "Требует проверки"),
-            confidence = confidence,
-            needsManualReview = needsReview,
-            beginnerInstructionEn = str("beginnerInstructionEn", instruction),
-            importantWarningEn = str("importantWarningEn", str("importantWarning", "Requires verification")),
-            repairStageEn = str("repairStageEn", str("repairStage")),
-            visibleActionEn = str("visibleActionEn", str("visibleAction"))
-        )
-    }
-
     private fun String.urlEnc(): String = java.net.URLEncoder.encode(this, Charsets.UTF_8.name())
 
     companion object {
         const val MAX_RATE_LIMIT_ATTEMPTS = 5
-        /** Gap between sequential photo analyses to reduce bursting into 429. */
         const val INTER_PHOTO_DELAY_MS = 1_200L
 
         fun parseRetryAfterSeconds(raw: String?): Long? {
             if (raw.isNullOrBlank()) return null
             raw.trim().toLongOrNull()?.let { return it.coerceIn(1L, 120L) }
-            // HTTP-date form is rare for AI APIs; ignore if not numeric
             return null
         }
 
@@ -317,7 +314,6 @@ class AiClient(private val context: Context) {
             if (retryAfterSeconds != null) {
                 return (retryAfterSeconds * 1000L).coerceIn(500L, 60_000L)
             }
-            // attempt 1 → ~1s, 2 → ~2s, 3 → ~4s, 4 → ~8s (+ jitter)
             val base = (1000L * (1L shl (attempt - 1).coerceAtMost(4)))
             val jitter = Random.nextLong(0L, 400L)
             return min(base + jitter, 30_000L)
