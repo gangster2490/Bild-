@@ -56,6 +56,7 @@ fun TemplateScreen(repository: RinRepository, onBack: () -> Unit) {
         scope.launch {
             loading = true
             error = null
+            message = null
             try {
                 val name = UriIO.displayName(context, uri, "rin_template.pptx")
                 val info = repository.importTemplate(uri, name)
@@ -68,14 +69,14 @@ fun TemplateScreen(repository: RinRepository, onBack: () -> Unit) {
         }
     }
 
-    // OpenDocument (SAF) — preferred, persistable grants
+    // OpenDocument (SAF) — preferred; broad MIME so OEM pickers show PPTX saved as ZIP
     val openDocument = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) importUri(uri)
     }
 
-    // GetContent fallback — works on more devices when OpenDocument MIME filter is empty
+    // GetContent fallback — some devices fail OpenDocument with multi-MIME filters
     val getContent = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -103,10 +104,16 @@ fun TemplateScreen(repository: RinRepository, onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                "Загрузите RIN-шаблон PowerPoint через Storage Access Framework. Шаблон не встроен в APK.",
+                "Загрузите RIN-шаблон PowerPoint через файловый менеджер. Шаблон не встроен в APK.",
                 style = MaterialTheme.typography.bodyLarge
             )
-            Text("Разрешены: PPTX, ZIP, JSON, PDF. Основной шаблон — .pptx.")
+            Text(
+                "Основной формат — .pptx. Если система показывает файл как ZIP — это нормально: " +
+                    "приложение определяет PPTX по содержимому, а не только по расширению.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text("Также допускаются ZIP, JSON и PDF.")
 
             if (template == null) {
                 Text(
@@ -117,12 +124,30 @@ fun TemplateScreen(repository: RinRepository, onBack: () -> Unit) {
             } else {
                 Text("Файл: ${template!!.fileName}", style = MaterialTheme.typography.titleLarge)
                 Text("Размер: ${template!!.sizeBytes / 1024} КБ")
+                val stored = repository.templateFile()
+                if (stored != null) {
+                    Text(
+                        "Сохранено как: ${stored.name}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             Button(
                 onClick = {
-                    // Use */* so OEM document UIs always show files; we validate extension after pick.
-                    openDocument.launch(arrayOf("*/*"))
+                    openDocument.launch(
+                        arrayOf(
+                            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                            "application/vnd.ms-powerpoint",
+                            "application/zip",
+                            "application/x-zip-compressed",
+                            "application/octet-stream",
+                            "application/pdf",
+                            "application/json",
+                            "*/*"
+                        )
+                    )
                 },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !loading
@@ -146,7 +171,7 @@ fun TemplateScreen(repository: RinRepository, onBack: () -> Unit) {
 
             if (loading) {
                 CircularProgressIndicator()
-                Text("Копирование файла во внутреннее хранилище…")
+                Text("Копирование и проверка файла…")
             }
 
             message?.let { Text(it, color = MaterialTheme.colorScheme.secondary) }
@@ -166,6 +191,7 @@ fun TemplateScreen(repository: RinRepository, onBack: () -> Unit) {
                     scope.launch {
                         repository.deleteTemplate()
                         message = "Шаблон удалён"
+                        error = null
                     }
                 }) { Text("Удалить") }
             },

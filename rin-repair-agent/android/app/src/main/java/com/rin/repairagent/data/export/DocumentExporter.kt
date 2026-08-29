@@ -10,6 +10,7 @@ import com.rin.repairagent.data.model.PhotoAnalysis
 import com.rin.repairagent.data.model.ProjectPhoto
 import com.rin.repairagent.data.model.RepairProject
 import com.rin.repairagent.data.model.ResultLanguage
+import com.rin.repairagent.util.TemplateFileHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedOutputStream
@@ -131,7 +132,10 @@ class DocumentExporter {
                 "ppt/_rels/presentation.xml.rels",
                 "ppt/media/"
             )
-            if (template.exists() && template.extension.equals("pptx", true)) {
+            // Accept PPTX even if stored as .zip (OEM MIME/extension mismatch)
+            if (template.exists() &&
+                (template.extension.equals("pptx", true) || TemplateFileHelper.looksLikePptxZip(template))
+            ) {
                 try {
                     ZipFile(template).use { zip ->
                         val entries = zip.entries()
