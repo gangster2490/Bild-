@@ -1,4 +1,5 @@
 Проанализируй ОДНУ эту фотографию ремонта по системным правилам.
+Стиль описания — как в RIN eGazelle (короткие шаги, инструменты, «Важно: …»).
 
 Контекст проекта (только для ориентации, не выдумывай по нему скрытые шаги):
 - Название ремонта: {{title}}
@@ -8,7 +9,7 @@
 В JSON поле photoNumber должно быть {{photoNumber}}.
 
 Дополнительно к обязательным полям системного формата заполни, если возможно:
-- "beginnerInstructionEn": английский перевод beginnerInstruction
+- "beginnerInstructionEn": английский перевод beginnerInstruction в том же RIN-стиле
 - "importantWarningEn": английский перевод importantWarning
 - "repairStageEn": английский перевод repairStage
 - "visibleActionEn": английский перевод visibleAction
