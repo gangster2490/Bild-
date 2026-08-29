@@ -46,9 +46,12 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.rin.repairagent.data.RinRepository
+import com.rin.repairagent.data.ai.AiClient
+import com.rin.repairagent.data.ai.RateLimitException
 import com.rin.repairagent.data.model.RepairProject
 import com.rin.repairagent.data.model.ResultLanguage
 import com.rin.repairagent.util.UriIO
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -93,8 +96,12 @@ fun NewRepairScreen(
         scope.launch {
             analyzing = true
             try {
-                for (id in newIds) {
-                    status = "AI анализирует фото…"
+                newIds.forEachIndexed { index, id ->
+                    if (index > 0) {
+                        status = "Пауза перед следующим фото (защита от лимита API)…"
+                        delay(AiClient.INTER_PHOTO_DELAY_MS)
+                    }
+                    status = "AI анализирует фото ${index + 1}/${newIds.size}…"
                     val current = repository.analyzePhoto(
                         repository.loadProject(projectId) ?: return@launch,
                         id
@@ -113,6 +120,11 @@ fun NewRepairScreen(
                         }
                     }
                 }
+            } catch (e: RateLimitException) {
+                project = repository.loadProject(projectId) ?: project
+                error = e.message
+                    ?: "Лимит запросов API (HTTP 429). Фотографии сохранены — повторите анализ позже."
+                status = "Анализ остановлен из‑за лимита запросов"
             } catch (e: Exception) {
                 // Photos stay saved locally even if AI fails
                 project = repository.loadProject(projectId) ?: project
