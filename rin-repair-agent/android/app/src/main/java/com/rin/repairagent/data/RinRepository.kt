@@ -5,6 +5,7 @@ import android.net.Uri
 import com.rin.repairagent.data.ai.AiClient
 import com.rin.repairagent.data.export.DocumentExporter
 import com.rin.repairagent.data.export.ExportStep
+import com.rin.repairagent.data.knowledge.KnowledgeBase
 import com.rin.repairagent.data.local.AppStorage
 import com.rin.repairagent.data.model.AiProvider
 import com.rin.repairagent.data.model.ApiKeyCheckResponse
@@ -30,9 +31,12 @@ class RinRepository(
     private val vault: ApiKeyVault = ApiKeyVault(context),
     private val storage: AppStorage = AppStorage(context),
     private val ai: AiClient = AiClient(context),
-    private val exporter: DocumentExporter = DocumentExporter()
+    private val exporter: DocumentExporter = DocumentExporter(),
+    private val knowledge: KnowledgeBase = KnowledgeBase(context)
 ) {
     val templateInfoFlow: Flow<TemplateInfo?> = storage.templateInfoFlow()
+
+    fun knowledgeTopics(): List<KnowledgeBase.Topic> = knowledge.listTopics()
 
     fun hasApiKey(): Boolean = vault.hasKey()
     fun maskedKey(): String = vault.getMaskedKey()
