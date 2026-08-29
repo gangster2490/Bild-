@@ -39,3 +39,8 @@ output/*
 **/secrets/
 **/*keystore*
 **/api_key*
+
+# Allow shipping the built debug APK for download
+!dist/
+!dist/**
+!dist/*.apk
