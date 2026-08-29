@@ -150,7 +150,7 @@ fun ApiKeyScreen(
                             }
                         } catch (e: Exception) {
                             verified = false
-                            error = "Не удалось проверить ключ. Проверьте адрес сервера и интернет.\n${e.message ?: ""}"
+                            error = "Не удалось проверить ключ. Нужен интернет до OpenAI/Gemini.\n${e.message ?: ""}"
                         } finally {
                             loading = false
                         }

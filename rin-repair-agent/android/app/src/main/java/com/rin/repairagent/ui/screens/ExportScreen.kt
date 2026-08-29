@@ -120,7 +120,6 @@ fun ExportScreen(
                                 error = exportResult.validation.errors.joinToString("\n")
                                     .ifBlank { "Ошибка генерации документов" }
                             } else {
-                                repository.downloadExportFiles(projectId, exportResult.files)
                                 repository.saveProject(p.copy(exportReady = true, reviewCompleted = true))
                             }
                         } catch (e: Exception) {
@@ -136,13 +135,21 @@ fun ExportScreen(
 
             if (loading) {
                 CircularProgressIndicator()
-                Text("Генерация документов на сервере…")
+                Text("Генерация документов на телефоне…")
             }
 
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
             result?.files?.forEach { file ->
                 Text("✓ ${file.name}")
+            }
+
+            val localFiles = remember(result, projectId) { repository.listExportedFiles(projectId) }
+            if (localFiles.isNotEmpty()) {
+                Text("Сохранено локально:", style = MaterialTheme.typography.titleLarge)
+                localFiles.forEach { f ->
+                    Text("• ${f.name} (${f.length() / 1024} КБ)")
+                }
             }
 
             Text(

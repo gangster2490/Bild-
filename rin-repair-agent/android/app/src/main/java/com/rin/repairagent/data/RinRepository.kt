@@ -2,38 +2,36 @@ package com.rin.repairagent.data
 
 import android.content.Context
 import android.net.Uri
+import com.rin.repairagent.data.ai.AiClient
+import com.rin.repairagent.data.export.DocumentExporter
+import com.rin.repairagent.data.export.ExportStep
 import com.rin.repairagent.data.local.AppStorage
 import com.rin.repairagent.data.model.AiProvider
-import com.rin.repairagent.data.model.AnalyzeResponse
 import com.rin.repairagent.data.model.ApiKeyCheckResponse
 import com.rin.repairagent.data.model.ExportResult
 import com.rin.repairagent.data.model.ExportValidation
-import com.rin.repairagent.data.model.PhotoAnalysis
+import com.rin.repairagent.data.model.ExportedFile
 import com.rin.repairagent.data.model.ProjectPhoto
 import com.rin.repairagent.data.model.RepairProject
 import com.rin.repairagent.data.model.ResultLanguage
 import com.rin.repairagent.data.model.ReviewStatus
 import com.rin.repairagent.data.model.TemplateInfo
-import com.rin.repairagent.data.remote.ApiClientFactory
 import com.rin.repairagent.data.security.ApiKeyVault
 import kotlinx.coroutines.flow.Flow
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
-import okhttp3.RequestBody.Companion.asRequestBody
-import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.util.UUID
 
+/**
+ * Standalone repository: AI + PPTX/PDF run on device.
+ * No backend server / generation URL is required.
+ */
 class RinRepository(
     context: Context,
     private val vault: ApiKeyVault = ApiKeyVault(context),
-    private val storage: AppStorage = AppStorage(context)
+    private val storage: AppStorage = AppStorage(context),
+    private val ai: AiClient = AiClient(context),
+    private val exporter: DocumentExporter = DocumentExporter()
 ) {
-    private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
-
-    val serverUrlFlow: Flow<String> = storage.serverUrlFlow
     val templateInfoFlow: Flow<TemplateInfo?> = storage.templateInfoFlow()
 
     fun hasApiKey(): Boolean = vault.hasKey()
@@ -47,23 +45,16 @@ class RinRepository(
 
     fun deleteApiKey() = vault.deleteKey()
 
-    suspend fun setServerUrl(url: String) = storage.setServerUrl(url)
-    suspend fun getServerUrl(): String = storage.getServerUrl()
+    suspend fun verifyApiKey(key: String, provider: AiProvider): ApiKeyCheckResponse =
+        ai.checkKey(key, provider)
 
-    private suspend fun api() = ApiClientFactory.create(storage.getServerUrl())
-
-    suspend fun checkConnection(): Result<String> = runCatching {
-        val health = api().health()
-        health["status"] ?: "ok"
-    }
-
-    suspend fun verifyApiKey(key: String, provider: AiProvider): ApiKeyCheckResponse {
-        return api().checkKey(
-            mapOf(
-                "apiKey" to key.trim(),
-                "provider" to provider.name
-            )
-        )
+    /** Checks that the saved provider API key still works (direct cloud API). */
+    suspend fun checkProviderConnection(): Result<String> = runCatching {
+        val key = vault.unlockKey() ?: error("API-ключ не сохранён")
+        val provider = runCatching { AiProvider.valueOf(vault.getProvider()) }.getOrDefault(AiProvider.OPENAI)
+        val result = ai.checkKey(key, provider)
+        if (!result.ok) error(result.message.ifBlank { "Ключ отклонён провайдером" })
+        result.message.ifBlank { "OK (${provider.name})" }
     }
 
     suspend fun importTemplate(uri: Uri, name: String): TemplateInfo =
@@ -199,28 +190,22 @@ class RinRepository(
 
     suspend fun analyzePhoto(project: RepairProject, photoId: String): RepairProject {
         val apiKey = vault.unlockKey() ?: error("API-ключ не сохранён")
-        val provider = vault.getProvider()
+        val provider = runCatching { AiProvider.valueOf(vault.getProvider()) }.getOrDefault(AiProvider.OPENAI)
         val latest = storage.loadProject(project.id) ?: project
         val photo = latest.photos.firstOrNull { it.id == photoId }
             ?: error("Фотография не найдена в проекте")
         val file = File(photo.localPath)
         require(file.exists() && file.length() > 0L) { "Файл фотографии не найден или пустой" }
 
-        val body = file.asRequestBody("image/jpeg".toMediaType())
-        val part = MultipartBody.Part.createFormData("image", file.name, body)
-        val text = { v: String -> v.toRequestBody("text/plain".toMediaType()) }
+        val analysis = ai.analyzePhoto(
+            apiKey = apiKey,
+            provider = provider,
+            imageFile = file,
+            photoNumber = photo.photoNumber,
+            projectTitle = latest.title,
+            productModel = latest.productModel
+        ).copy(photoNumber = photo.photoNumber)
 
-        val response: AnalyzeResponse = api().analyzePhoto(
-            image = part,
-            provider = text(provider),
-            apiKey = text(apiKey),
-            photoNumber = text(photo.photoNumber.toString()),
-            projectTitle = text(latest.title),
-            productModel = text(latest.productModel),
-            language = text(latest.language.name)
-        )
-
-        val analysis = response.analysis.copy(photoNumber = photo.photoNumber)
         val status = when {
             analysis.needsManualReview || analysis.confidence < 0.55 -> ReviewStatus.UNCLEAR
             else -> ReviewStatus.NEEDS_REVIEW
@@ -342,66 +327,41 @@ class RinRepository(
             .filter { it.reviewStatus != ReviewStatus.CAN_DELETE }
             .sortedBy { it.photoNumber }
 
-        val templatePart = MultipartBody.Part.createFormData(
-            "template",
-            template.name,
-            template.asRequestBody("application/vnd.openxmlformats-officedocument.presentationml.presentation".toMediaType())
-        )
-        val photoParts = usable.map { photo ->
-            val file = File(photo.localPath)
-            MultipartBody.Part.createFormData(
-                "photos",
-                file.name,
-                file.asRequestBody("image/jpeg".toMediaType())
+        val steps = usable.map { photo ->
+            val analysis = photo.analysis!!
+            val instruction = photo.userEditedInstruction ?: analysis.beginnerInstruction
+            ExportStep(
+                photo = photo,
+                analysis = analysis,
+                instructionRu = instruction,
+                instructionEn = analysis.beginnerInstructionEn.ifBlank { instruction }
             )
         }
 
-        // API key is intentionally NOT included in export payload or documents.
-        val stepsJson = usable.joinToString(prefix = "[", postfix = "]") { photo ->
-            val analysis = photo.analysis!!
-            val instruction = photo.userEditedInstruction ?: analysis.beginnerInstruction
-            val objects = analysis.visibleObjects.joinToString(prefix = "[", postfix = "]") {
-                "\"${it.jsonEsc()}\""
-            }
-            val tools = analysis.tools.joinToString(prefix = "[", postfix = "]") {
-                "\"${it.jsonEsc()}\""
-            }
-            """
-            {
-              "photoNumber": ${photo.photoNumber},
-              "visibleObjects": $objects,
-              "visibleAction": "${analysis.visibleAction.jsonEsc()}",
-              "visibleActionEn": "${analysis.visibleActionEn.ifBlank { analysis.visibleAction }.jsonEsc()}",
-              "repairStage": "${analysis.repairStage.jsonEsc()}",
-              "repairStageEn": "${analysis.repairStageEn.ifBlank { analysis.repairStage }.jsonEsc()}",
-              "tools": $tools,
-              "beginnerInstruction": "${instruction.jsonEsc()}",
-              "beginnerInstructionEn": "${analysis.beginnerInstructionEn.ifBlank { instruction }.jsonEsc()}",
-              "importantWarning": "${analysis.importantWarning.jsonEsc()}",
-              "importantWarningEn": "${analysis.importantWarningEn.ifBlank { analysis.importantWarning }.jsonEsc()}",
-              "confidence": ${analysis.confidence},
-              "needsManualReview": ${analysis.needsManualReview},
-              "fileName": "${File(photo.localPath).name.jsonEsc()}"
-            }
-            """.trimIndent()
-        }
-        val payloadJson = """
-        {
-          "projectId": "${project.id.jsonEsc()}",
-          "title": "${project.title.jsonEsc()}",
-          "productModel": "${project.productModel.jsonEsc()}",
-          "serialNumber": "${project.serialNumber.jsonEsc()}",
-          "language": "${project.language.name}",
-          "steps": $stepsJson
-        }
-        """.trimIndent()
-        val payloadBody = payloadJson.toRequestBody("application/json".toMediaType())
+        val outDir = File(storage.exportsDirectory(), project.id).also { it.mkdirs() }
+        // Clear previous exports for this project
+        outDir.listFiles()?.forEach { it.delete() }
 
-        val result = api().exportDocuments(templatePart, photoParts, payloadBody)
-
-        // Persist exported files locally when backend returns absolute paths via relativePath content download
-        // Backend returns file names; Android downloads via separate endpoints if needed.
-        return result.copy(validation = validation.copy(canExport = result.validation.errors.isEmpty() && validation.canExport))
+        val (files, genErrors) = exporter.export(project, template, steps, outDir)
+        val pptErrors = genErrors.count { it.startsWith("PowerPoint") }
+        val pdfErrors = genErrors.count { it.startsWith("PDF") }
+        val finalValidation = validation.copy(
+            powerpointErrors = pptErrors,
+            pdfErrors = pdfErrors,
+            canExport = genErrors.isEmpty() && files.isNotEmpty(),
+            errors = (validation.errors + genErrors).distinct()
+        )
+        return ExportResult(
+            projectId = project.id,
+            files = files.map {
+                ExportedFile(
+                    name = it.name,
+                    relativePath = it.relativePath,
+                    mimeType = it.mimeType
+                )
+            },
+            validation = finalValidation
+        )
     }
 
     fun listExportedFiles(projectId: String): List<File> {
@@ -409,29 +369,4 @@ class RinRepository(
         if (!dir.exists()) return emptyList()
         return dir.listFiles()?.sortedBy { it.name }?.toList() ?: emptyList()
     }
-
-    suspend fun downloadExportFiles(projectId: String, files: List<com.rin.repairagent.data.model.ExportedFile>) {
-        // Files are served by backend at /exports/:projectId/:name — download into local exports dir
-        val base = storage.getServerUrl().trimEnd('/')
-        val destDir = File(storage.exportsDirectory(), projectId).also { it.mkdirs() }
-        val client = okhttp3.OkHttpClient()
-        files.forEach { file ->
-            val url = "$base/exports/$projectId/${file.name}"
-            val request = okhttp3.Request.Builder().url(url).get().build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@forEach
-                val body = response.body ?: return@forEach
-                File(destDir, file.name).outputStream().use { out ->
-                    body.byteStream().copyTo(out)
-                }
-            }
-        }
-    }
 }
-
-private fun String.jsonEsc(): String =
-    replace("\\", "\\\\")
-        .replace("\"", "\\\"")
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")

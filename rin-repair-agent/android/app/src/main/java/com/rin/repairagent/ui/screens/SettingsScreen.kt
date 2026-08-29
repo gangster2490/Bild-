@@ -15,12 +15,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,8 +36,6 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onChangeKey: () -> Unit
 ) {
-    val serverFlow by repository.serverUrlFlow.collectAsState(initial = "http://10.0.2.2:3000")
-    var server by remember(serverFlow) { mutableStateOf(serverFlow) }
     var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -64,46 +60,30 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("Адрес сервера генерации", style = MaterialTheme.typography.titleLarge)
-            Text("По умолчанию для эмулятора: http://10.0.2.2:3000")
-            Text("Для реального телефона укажите IP компьютера или HTTPS-адрес.")
-
-            OutlinedTextField(
-                value = server,
-                onValueChange = { server = it },
-                label = { Text("Адрес сервера генерации") },
-                modifier = Modifier.fillMaxWidth()
+            Text("Работа без сервера", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "Приложение вызывает OpenAI или Gemini напрямую и создаёт PowerPoint/PDF на телефоне. " +
+                    "Адрес сервера генерации не нужен."
             )
 
-            Button(
-                onClick = {
-                    scope.launch {
-                        repository.setServerUrl(server)
-                        status = "Адрес сохранён"
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("Сохранить адрес") }
+            Text("API-ключ: ${repository.maskedKey()}")
+            Text("Провайдер: ${repository.provider()}")
 
             OutlinedButton(
                 onClick = {
                     scope.launch {
                         try {
-                            repository.setServerUrl(server)
-                            val s = repository.checkConnection()
-                            status = "Подключение OK: ${s.getOrThrow()}"
+                            val msg = repository.checkProviderConnection().getOrThrow()
+                            status = "Подключение к провайдеру OK: $msg"
                             error = null
                         } catch (e: Exception) {
-                            error = "Нет подключения: ${e.message}"
+                            error = "Нет подключения к AI-провайдеру: ${e.message}"
                             status = null
                         }
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Проверить подключение") }
-
-            Text("API-ключ: ${repository.maskedKey()}")
-            Text("Провайдер: ${repository.provider()}")
 
             Button(onClick = onChangeKey, modifier = Modifier.fillMaxWidth()) {
                 Text("Изменить ключ")
