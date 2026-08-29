@@ -2,6 +2,7 @@ package com.rin.repairagent.data.ai
 
 import android.content.Context
 import android.util.Base64
+import com.rin.repairagent.data.knowledge.KnowledgeBase
 import com.rin.repairagent.data.model.AiProvider
 import com.rin.repairagent.data.model.ApiKeyCheckResponse
 import com.rin.repairagent.data.model.PhotoAnalysis
@@ -28,10 +29,12 @@ import kotlin.random.Random
  * Calls OpenAI / Gemini directly from the device. No app backend required.
  * API keys must never be logged. HTTP 429 is retried with backoff.
  * Analysis results are always normalized into valid JSON via [AnalysisJson].
+ * Repair knowledge base (strollers / car seats) is injected into the system prompt.
  */
 class AiClient(private val context: Context) {
 
     private val json = AnalysisJson.json
+    private val knowledge = KnowledgeBase(context)
 
     private val http = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
@@ -60,7 +63,7 @@ class AiClient(private val context: Context) {
         productModel: String
     ): PhotoAnalysis = withContext(Dispatchers.IO) {
         require(imageFile.exists() && imageFile.length() > 0L) { "Файл фотографии пустой" }
-        val systemPrompt = loadSystemPrompt()
+        val systemPrompt = loadSystemPrompt(projectTitle, productModel)
         val userPrompt = loadUserPrompt(projectTitle, productModel, photoNumber)
         val b64 = Base64.encodeToString(imageFile.readBytes(), Base64.NO_WRAP)
         val raw = when (provider) {
@@ -279,15 +282,14 @@ class AiClient(private val context: Context) {
         }
     }
 
-    private fun loadSystemPrompt(): String {
-        val fromAssets = runCatching {
+    private fun loadSystemPrompt(projectTitle: String, productModel: String): String {
+        val base = runCatching {
             context.assets.open("prompts/system_prompt.txt").bufferedReader().use { it.readText() }
-        }.getOrNull()?.trim().orEmpty()
-        return if (fromAssets.isNotBlank()) {
-            fromAssets
-        } else {
+        }.getOrNull()?.trim().orEmpty().ifBlank {
             "You are the RIN Repair Instruction Agent. ${AnalysisJson.JSON_ONLY_SYSTEM_SUFFIX}"
         }
+        val kb = knowledge.contextForProject(projectTitle, productModel)
+        return if (kb.isBlank()) base else "$base\n\n$kb"
     }
 
     private fun loadUserPrompt(title: String, model: String, photoNumber: Int): String {

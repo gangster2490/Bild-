@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "title": "RIN Repair Agent — база знаний",
+  "domains": [
+    {
+      "id": "safety",
+      "title": "Общие правила безопасности",
+      "file": "safety.txt",
+      "keywords": ["безопас", "safety", "важно", "предупрежд"]
+    },
+    {
+      "id": "tools",
+      "title": "Инструменты и крепёж",
+      "file": "tools.txt",
+      "keywords": ["инструмент", "отвёрт", "ключ", "бит", "винт", "гайк", "tool"]
+    },
+    {
+      "id": "strollers",
+      "title": "Коляски и приводы",
+      "file": "strollers.txt",
+      "keywords": [
+        "коляск", "stroller", "egazelle", "gazelle", "привод", "мотор", "ремень",
+        "шкив", "колес", "рама", "корзин", "cybex", "e-gazelle", "электр"
+      ]
+    },
+    {
+      "id": "car_seats",
+      "title": "Детские автокресла",
+      "file": "car_seats.txt",
+      "keywords": [
+        "автокресл", "кресл", "car seat", "isosifix", "isofix", "ремень безопасност",
+        "harness", "пяточк", "база", "base", "cloud", "sirona", "pallas", "solution"
+      ]
+    },
+    {
+      "id": "rin_style",
+      "title": "Стиль RIN-инструкций",
+      "file": "rin_style.txt",
+      "keywords": ["rin", "инструкц", "шаг"]
+    }
+  ]
+}

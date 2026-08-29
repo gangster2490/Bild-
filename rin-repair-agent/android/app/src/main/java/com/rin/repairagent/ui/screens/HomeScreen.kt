@@ -31,6 +31,7 @@ fun HomeScreen(
     onTemplate: () -> Unit,
     onProjects: () -> Unit,
     onInstructions: () -> Unit,
+    onKnowledge: () -> Unit,
     onSettings: () -> Unit
 ) {
     val template by repository.templateInfoFlow.collectAsState(initial = null)
@@ -88,6 +89,9 @@ fun HomeScreen(
             }
             OutlinedButton(onClick = onInstructions, modifier = Modifier.fillMaxWidth()) {
                 Text("Готовые инструкции")
+            }
+            OutlinedButton(onClick = onKnowledge, modifier = Modifier.fillMaxWidth()) {
+                Text("База знаний")
             }
             OutlinedButton(onClick = onSettings, modifier = Modifier.fillMaxWidth()) {
                 Text("Настройки")

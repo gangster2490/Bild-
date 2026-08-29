@@ -12,6 +12,7 @@ import com.rin.repairagent.ui.screens.ApiKeyScreen
 import com.rin.repairagent.ui.screens.ExportScreen
 import com.rin.repairagent.ui.screens.HomeScreen
 import com.rin.repairagent.ui.screens.InstructionsScreen
+import com.rin.repairagent.ui.screens.KnowledgeScreen
 import com.rin.repairagent.ui.screens.NewRepairScreen
 import com.rin.repairagent.ui.screens.ProjectsScreen
 import com.rin.repairagent.ui.screens.ReviewScreen
@@ -25,6 +26,7 @@ object Routes {
     const val NEW_REPAIR = "new_repair"
     const val PROJECTS = "projects"
     const val INSTRUCTIONS = "instructions"
+    const val KNOWLEDGE = "knowledge"
     const val SETTINGS = "settings"
     const val REVIEW = "review/{projectId}"
     const val EXPORT = "export/{projectId}"
@@ -58,6 +60,7 @@ fun RinNavGraph(repository: RinRepository) {
                 onTemplate = { nav.navigate(Routes.TEMPLATE) },
                 onProjects = { nav.navigate(Routes.PROJECTS) },
                 onInstructions = { nav.navigate(Routes.INSTRUCTIONS) },
+                onKnowledge = { nav.navigate(Routes.KNOWLEDGE) },
                 onSettings = { nav.navigate(Routes.SETTINGS) }
             )
         }
@@ -84,6 +87,9 @@ fun RinNavGraph(repository: RinRepository) {
                 onBack = { nav.popBackStack() },
                 onOpenExport = { id -> nav.navigate(Routes.export(id)) }
             )
+        }
+        composable(Routes.KNOWLEDGE) {
+            KnowledgeScreen(repository = repository, onBack = { nav.popBackStack() })
         }
         composable(Routes.SETTINGS) {
             SettingsScreen(
