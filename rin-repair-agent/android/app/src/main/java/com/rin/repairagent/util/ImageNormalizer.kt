@@ -8,16 +8,14 @@ import android.net.Uri
 import android.os.Build
 import android.util.Size
 import androidx.exifinterface.media.ExifInterface
-import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileOutputStream
-import java.io.InputStream
 import kotlin.math.max
 import kotlin.math.roundToInt
 
 /**
- * Decodes gallery/camera/ZIP images (JPEG/PNG/WebP/HEIC when supported)
- * and writes a normalized JPEG for reliable AI upload and thumbnails.
+ * Decodes gallery/camera/ZIP images and writes a normalized JPEG.
+ * Always prefers file-based decode (stable for EXIF + ImageDecoder).
  */
 object ImageNormalizer {
 
@@ -25,83 +23,98 @@ object ImageNormalizer {
     private const val JPEG_QUALITY = 90
 
     fun saveUriAsJpeg(context: Context, uri: Uri, dest: File): File {
-        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            ?: error("Не удалось открыть изображение")
-        return saveBytesAsJpeg(bytes, dest)
+        val cache = UriIO.copyUriToCache(context, uri, "img", ".bin")
+        return try {
+            saveFileAsJpeg(cache, dest)
+        } finally {
+            cache.delete()
+        }
     }
 
     fun saveFileAsJpeg(source: File, dest: File): File {
         require(source.exists() && source.length() > 0L) { "Файл фотографии пустой или отсутствует" }
-        return saveBytesAsJpeg(source.readBytes(), dest)
-    }
 
-    fun saveStreamAsJpeg(input: InputStream, dest: File): File {
-        return saveBytesAsJpeg(input.readBytes(), dest)
-    }
+        // Fast path: already a valid JPEG small enough — still re-encode for orientation/size consistency
+        val bitmap = decodeBitmapFromFile(source)
+            ?: error("Не удалось декодировать изображение. Поддерживаются JPEG, PNG, WebP, HEIC.")
 
-    fun saveBytesAsJpeg(bytes: ByteArray, dest: File): File {
-        require(bytes.isNotEmpty()) { "Пустые данные изображения" }
-        val bitmap = decodeBitmap(bytes)
-            ?: error("Не удалось декодировать изображение. Поддерживаются JPEG, PNG, WebP.")
         dest.parentFile?.mkdirs()
-        FileOutputStream(dest).use { out ->
-            val ok = bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
-            if (!ok) error("Не удалось сохранить JPEG")
+        val tmp = File(dest.parentFile, "${dest.name}.tmp")
+        try {
+            FileOutputStream(tmp).use { out ->
+                val ok = bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+                if (!ok) error("Не удалось сохранить JPEG")
+            }
+            if (!tmp.renameTo(dest)) {
+                tmp.copyTo(dest, overwrite = true)
+                tmp.delete()
+            }
+        } finally {
+            if (!bitmap.isRecycled) bitmap.recycle()
+            if (tmp.exists() && tmp.absolutePath != dest.absolutePath) tmp.delete()
         }
-        if (!bitmap.isRecycled) bitmap.recycle()
         require(dest.exists() && dest.length() > 0L) { "Сохранённый файл фотографии пустой" }
         return dest
     }
 
-    private fun decodeBitmap(bytes: ByteArray): Bitmap? {
+    fun saveBytesAsJpeg(bytes: ByteArray, dest: File): File {
+        require(bytes.isNotEmpty()) { "Пустые данные изображения" }
+        val tmp = File(dest.parentFile ?: File("."), "bytes_${System.nanoTime()}.bin")
+        try {
+            tmp.writeBytes(bytes)
+            return saveFileAsJpeg(tmp, dest)
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    private fun decodeBitmapFromFile(file: File): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-            // Fallback for HEIC / exotic formats on API 28+
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                return decodeWithImageDecoder(bytes)?.let { applyExif(it, bytes) }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+
+        var decoded: Bitmap? = null
+        if (bounds.outWidth > 0 && bounds.outHeight > 0) {
+            val sample = calculateInSampleSize(Size(bounds.outWidth, bounds.outHeight), MAX_SIDE)
+            val opts = BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.ARGB_8888
             }
-            return null
+            decoded = BitmapFactory.decodeFile(file.absolutePath, opts)
         }
 
-        val sample = calculateInSampleSize(
-            Size(bounds.outWidth, bounds.outHeight),
-            MAX_SIDE
-        )
-        val opts = BitmapFactory.Options().apply {
-            inSampleSize = sample
-            inPreferredConfig = Bitmap.Config.ARGB_8888
+        if (decoded == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            decoded = decodeWithImageDecoder(file)
         }
-        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-            ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                decodeWithImageDecoder(bytes)
-            } else {
-                null
-            }
-            ?: return null
+        if (decoded == null) return null
 
-        val oriented = applyExif(decoded, bytes)
+        val oriented = applyExif(decoded, file)
         return scaleDownIfNeeded(oriented, MAX_SIDE)
     }
 
-    private fun decodeWithImageDecoder(bytes: ByteArray): Bitmap? {
+    private fun decodeWithImageDecoder(file: File): Bitmap? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
         return try {
-            val source = android.graphics.ImageDecoder.createSource(
-                java.nio.ByteBuffer.wrap(bytes)
-            )
-            android.graphics.ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+            val source = android.graphics.ImageDecoder.createSource(file)
+            android.graphics.ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
                 decoder.isMutableRequired = true
                 decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+                val largest = max(info.size.width, info.size.height)
+                if (largest > MAX_SIDE) {
+                    val scale = MAX_SIDE.toFloat() / largest.toFloat()
+                    decoder.setTargetSize(
+                        (info.size.width * scale).roundToInt().coerceAtLeast(1),
+                        (info.size.height * scale).roundToInt().coerceAtLeast(1)
+                    )
+                }
             }
         } catch (_: Exception) {
             null
         }
     }
 
-    private fun applyExif(bitmap: Bitmap, bytes: ByteArray): Bitmap {
+    private fun applyExif(bitmap: Bitmap, file: File): Bitmap {
         val orientation = try {
-            ExifInterface(ByteArrayInputStream(bytes)).getAttributeInt(
+            ExifInterface(file.absolutePath).getAttributeInt(
                 ExifInterface.TAG_ORIENTATION,
                 ExifInterface.ORIENTATION_NORMAL
             )
@@ -152,10 +165,9 @@ object ImageNormalizer {
         var inSampleSize = 1
         var halfW = size.width / 2
         var halfH = size.height / 2
-        while (halfW / inSampleSize >= maxSide || halfH / inSampleSize >= maxSide) {
+        while ((halfW / inSampleSize) >= maxSide || (halfH / inSampleSize) >= maxSide) {
             inSampleSize *= 2
         }
-        // Also reduce if either dimension alone is huge
         while (size.width / inSampleSize > maxSide * 2 || size.height / inSampleSize > maxSide * 2) {
             inSampleSize *= 2
         }

@@ -1,7 +1,6 @@
 package com.rin.repairagent.ui.screens
 
 import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -49,6 +48,7 @@ import coil.compose.AsyncImage
 import com.rin.repairagent.data.RinRepository
 import com.rin.repairagent.data.model.RepairProject
 import com.rin.repairagent.data.model.ResultLanguage
+import com.rin.repairagent.util.UriIO
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -125,6 +125,7 @@ fun NewRepairScreen(
 
     fun importUris(uris: List<Uri>) {
         if (uris.isEmpty()) return
+        uris.forEach { UriIO.tryTakeReadPermission(context, it) }
         scope.launch {
             importing = true
             error = null
@@ -153,18 +154,16 @@ fun NewRepairScreen(
         ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris -> importUris(uris) }
 
+    // Fallback gallery picker for devices where Photo Picker fails
+    val galleryGetContent = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetMultipleContents()
+    ) { uris -> importUris(uris) }
+
     val zipPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        try {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-        } catch (_: SecurityException) {
-            // Some providers do not support persistable permissions; we copy immediately anyway.
-        }
+        UriIO.tryTakeReadPermission(context, uri)
         scope.launch {
             importing = true
             error = null
@@ -181,6 +180,32 @@ fun NewRepairScreen(
                     status = "Из ZIP загружено фото: ${ids.size}"
                     analyzeNewPhotos(current.id, ids)
                 }
+            } catch (e: Exception) {
+                error = e.message ?: "Не удалось импортировать ZIP"
+                project = project?.id?.let { repository.loadProject(it) } ?: project
+            } finally {
+                importing = false
+            }
+        }
+    }
+
+    val zipGetContent = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        UriIO.tryTakeReadPermission(context, uri)
+        scope.launch {
+            importing = true
+            error = null
+            try {
+                var current = ensureProjectReady()
+                status = "Импорт ZIP…"
+                val before = current.photos.map { it.id }.toSet()
+                current = repository.addPhotosFromZip(current, uri)
+                project = current
+                val ids = current.photos.map { it.id }.filterNot { it in before }
+                status = "Из ZIP загружено фото: ${ids.size}"
+                analyzeNewPhotos(current.id, ids)
             } catch (e: Exception) {
                 error = e.message ?: "Не удалось импортировать ZIP"
                 project = project?.id?.let { repository.loadProject(it) } ?: project
@@ -328,10 +353,22 @@ fun NewRepairScreen(
             ) { Text("Выбрать из галереи") }
 
             OutlinedButton(
-                onClick = { zipPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*")) },
+                onClick = { galleryGetContent.launch("image/*") },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !busy
+            ) { Text("Галерея (альтернативно)") }
+
+            OutlinedButton(
+                onClick = { zipPicker.launch(arrayOf("*/*")) },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !busy
             ) { Text("Загрузить ZIP") }
+
+            OutlinedButton(
+                onClick = { zipGetContent.launch("application/zip") },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !busy
+            ) { Text("ZIP (альтернативно)") }
 
             project?.let { p ->
                 Text("Фотографий: ${p.photos.size}")
