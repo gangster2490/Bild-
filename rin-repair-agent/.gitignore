@@ -1,0 +1,41 @@
+# Android
+android/.gradle/
+android/**/build/
+android/local.properties
+android/*.iml
+android/.idea/
+android/captures/
+android/.externalNativeBuild/
+android/.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Backend
+backend/node_modules/
+backend/uploads/
+backend/temp/
+backend/generated/
+backend/.env
+
+# Output / secrets
+output/*
+!output/.gitkeep
+*.pptx
+*.pdf
+!prompts/**
+
+# OS / IDE
+.DS_Store
+.idea/
+*.iml
+.vscode/
+*.log
+.env
+.env.*
+
+# Key material
+**/secrets/
+**/*keystore*
+**/api_key*

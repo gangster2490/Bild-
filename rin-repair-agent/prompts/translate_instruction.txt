@@ -1,0 +1,1 @@
+Translate or refine the repair step so RU and EN describe the SAME visible action, tools, and warnings. Do not invent new steps. Return JSON with beginnerInstruction, beginnerInstructionEn, importantWarning, importantWarningEn, repairStage, repairStageEn, visibleAction, visibleActionEn.
