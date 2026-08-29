@@ -6,11 +6,11 @@ import com.rin.repairagent.data.model.AiProvider
 import com.rin.repairagent.data.model.ApiKeyCheckResponse
 import com.rin.repairagent.data.model.PhotoAnalysis
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -26,10 +26,12 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.util.concurrent.TimeUnit
+import kotlin.math.min
+import kotlin.random.Random
 
 /**
  * Calls OpenAI / Gemini directly from the device. No app backend required.
- * API keys must never be logged.
+ * API keys must never be logged. HTTP 429 is retried with backoff.
  */
 class AiClient(private val context: Context) {
 
@@ -81,6 +83,11 @@ class AiClient(private val context: Context) {
             return when (res.code) {
                 200 -> ApiKeyCheckResponse(true, "OPENAI", "Ключ OpenAI действителен")
                 401 -> ApiKeyCheckResponse(false, "OPENAI", "Неверный API-ключ OpenAI")
+                429 -> ApiKeyCheckResponse(
+                    false,
+                    "OPENAI",
+                    "Лимит запросов OpenAI (HTTP 429). Подождите и повторите проверку ключа."
+                )
                 else -> ApiKeyCheckResponse(false, "OPENAI", "OpenAI недоступен (HTTP ${res.code})")
             }
         }
@@ -93,12 +100,17 @@ class AiClient(private val context: Context) {
             return when (res.code) {
                 200 -> ApiKeyCheckResponse(true, "GEMINI", "Ключ Gemini действителен")
                 400, 403 -> ApiKeyCheckResponse(false, "GEMINI", "Неверный API-ключ Gemini")
+                429 -> ApiKeyCheckResponse(
+                    false,
+                    "GEMINI",
+                    "Лимит запросов Gemini (HTTP 429). Подождите и повторите проверку ключа."
+                )
                 else -> ApiKeyCheckResponse(false, "GEMINI", "Gemini недоступен (HTTP ${res.code})")
             }
         }
     }
 
-    private fun analyzeOpenAi(apiKey: String, prompt: String, b64: String): String {
+    private suspend fun analyzeOpenAi(apiKey: String, prompt: String, b64: String): String {
         val body = buildJsonObject {
             put("model", "gpt-4o-mini")
             put("temperature", 0.2)
@@ -132,20 +144,20 @@ class AiClient(private val context: Context) {
             .post(body.toRequestBody("application/json".toMediaType()))
             .build()
 
-        http.newCall(req).execute().use { res ->
-            val text = res.body?.string().orEmpty()
-            if (res.code == 401) error("Неверный API-ключ OpenAI")
-            if (!res.isSuccessful) error("OpenAI ошибка: HTTP ${res.code}")
-            val root = json.parseToJsonElement(text).jsonObject
-            return root["choices"]?.jsonArray
-                ?.firstOrNull()?.jsonObject
-                ?.get("message")?.jsonObject
-                ?.get("content")?.jsonPrimitive?.contentOrNull
-                ?: error("Пустой ответ OpenAI")
+        val text = executeWithRateLimitRetry("OpenAI", req)
+        if (text.code == 401) error("Неверный API-ключ OpenAI")
+        if (text.code !in 200..299) {
+            error(friendlyHttpError("OpenAI", text.code, text.body))
         }
+        val root = json.parseToJsonElement(text.body).jsonObject
+        return root["choices"]?.jsonArray
+            ?.firstOrNull()?.jsonObject
+            ?.get("message")?.jsonObject
+            ?.get("content")?.jsonPrimitive?.contentOrNull
+            ?: error("Пустой ответ OpenAI")
     }
 
-    private fun analyzeGemini(apiKey: String, prompt: String, b64: String): String {
+    private suspend fun analyzeGemini(apiKey: String, prompt: String, b64: String): String {
         val body = buildJsonObject {
             put("contents", buildJsonArray {
                 add(buildJsonObject {
@@ -180,19 +192,59 @@ class AiClient(private val context: Context) {
             .post(body.toRequestBody("application/json".toMediaType()))
             .build()
 
-        http.newCall(req).execute().use { res ->
-            val text = res.body?.string().orEmpty()
-            if (res.code == 400 || res.code == 403) error("Неверный API-ключ Gemini")
-            if (!res.isSuccessful) error("Gemini ошибка: HTTP ${res.code}")
-            val root = json.parseToJsonElement(text).jsonObject
-            val parts = root["candidates"]?.jsonArray
-                ?.firstOrNull()?.jsonObject
-                ?.get("content")?.jsonObject
-                ?.get("parts")?.jsonArray
-                ?: error("Пустой ответ Gemini")
-            return parts.joinToString("\n") {
-                it.jsonObject["text"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val text = executeWithRateLimitRetry("Gemini", req)
+        if (text.code == 400 || text.code == 403) error("Неверный API-ключ Gemini")
+        if (text.code !in 200..299) {
+            error(friendlyHttpError("Gemini", text.code, text.body))
+        }
+        val root = json.parseToJsonElement(text.body).jsonObject
+        val parts = root["candidates"]?.jsonArray
+            ?.firstOrNull()?.jsonObject
+            ?.get("content")?.jsonObject
+            ?.get("parts")?.jsonArray
+            ?: error("Пустой ответ Gemini")
+        return parts.joinToString("\n") {
+            it.jsonObject["text"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        }
+    }
+
+    private data class HttpText(val code: Int, val body: String, val retryAfterSeconds: Long?)
+
+    /**
+     * Retries on HTTP 429 (and transient 503) with exponential backoff + jitter.
+     * Honours Retry-After when present.
+     */
+    private suspend fun executeWithRateLimitRetry(
+        providerLabel: String,
+        request: Request,
+        maxAttempts: Int = MAX_RATE_LIMIT_ATTEMPTS
+    ): HttpText {
+        var attempt = 0
+        while (true) {
+            attempt++
+            val result = http.newCall(request).execute().use { res ->
+                HttpText(
+                    code = res.code,
+                    body = res.body?.string().orEmpty(),
+                    retryAfterSeconds = parseRetryAfterSeconds(res.header("Retry-After"))
+                )
             }
+
+            if (result.code != 429 && result.code != 503) {
+                return result
+            }
+
+            if (attempt >= maxAttempts) {
+                val waitHint = result.retryAfterSeconds?.let { " Повторите через ~$it с." }.orEmpty()
+                throw RateLimitException(
+                    message = "$providerLabel: превышен лимит запросов (HTTP ${result.code}). " +
+                        "Фотографии сохранены — подождите и нажмите «Повторить анализ».$waitHint",
+                    httpCode = result.code,
+                    retryAfterSeconds = result.retryAfterSeconds
+                )
+            }
+
+            delay(computeBackoffMs(attempt, result.retryAfterSeconds))
         }
     }
 
@@ -248,4 +300,39 @@ class AiClient(private val context: Context) {
     }
 
     private fun String.urlEnc(): String = java.net.URLEncoder.encode(this, Charsets.UTF_8.name())
+
+    companion object {
+        const val MAX_RATE_LIMIT_ATTEMPTS = 5
+        /** Gap between sequential photo analyses to reduce bursting into 429. */
+        const val INTER_PHOTO_DELAY_MS = 1_200L
+
+        fun parseRetryAfterSeconds(raw: String?): Long? {
+            if (raw.isNullOrBlank()) return null
+            raw.trim().toLongOrNull()?.let { return it.coerceIn(1L, 120L) }
+            // HTTP-date form is rare for AI APIs; ignore if not numeric
+            return null
+        }
+
+        fun computeBackoffMs(attempt: Int, retryAfterSeconds: Long?): Long {
+            if (retryAfterSeconds != null) {
+                return (retryAfterSeconds * 1000L).coerceIn(500L, 60_000L)
+            }
+            // attempt 1 → ~1s, 2 → ~2s, 3 → ~4s, 4 → ~8s (+ jitter)
+            val base = (1000L * (1L shl (attempt - 1).coerceAtMost(4)))
+            val jitter = Random.nextLong(0L, 400L)
+            return min(base + jitter, 30_000L)
+        }
+
+        fun friendlyHttpError(provider: String, code: Int, body: String): String {
+            val snippet = body
+                .replace('\n', ' ')
+                .take(160)
+                .ifBlank { "без деталей" }
+            return when (code) {
+                429 -> "$provider: лимит запросов (HTTP 429). Подождите и повторите анализ."
+                500, 502, 503, 504 -> "$provider временно недоступен (HTTP $code). Повторите позже."
+                else -> "$provider ошибка: HTTP $code ($snippet)"
+            }
+        }
+    }
 }

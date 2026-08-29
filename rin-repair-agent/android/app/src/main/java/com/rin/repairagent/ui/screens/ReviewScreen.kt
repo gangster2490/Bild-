@@ -41,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.rin.repairagent.data.RinRepository
+import com.rin.repairagent.data.ai.formatAnalysisError
 import com.rin.repairagent.data.model.RepairProject
 import com.rin.repairagent.data.model.ReviewStatus
 import com.rin.repairagent.util.UriIO
@@ -84,7 +85,7 @@ fun ReviewScreen(
                 project = p
             } catch (e: Exception) {
                 project = repository.loadProject(id)
-                error = "Фото сохранено локально, если импорт успел завершиться. ${e.message}"
+                error = formatAnalysisError(e, savedLocally = true)
             } finally {
                 busy = false
             }
@@ -110,7 +111,7 @@ fun ReviewScreen(
                 project = p
             } catch (e: Exception) {
                 project = repository.loadProject(id)
-                error = e.message
+                error = formatAnalysisError(e, savedLocally = true)
             } finally {
                 busy = false
             }
@@ -232,10 +233,11 @@ fun ReviewScreen(
                         OutlinedButton(onClick = {
                             scope.launch {
                                 busy = true
+                                error = null
                                 try {
                                     project = repository.analyzePhoto(p, photo.id)
                                 } catch (e: Exception) {
-                                    error = e.message
+                                    error = formatAnalysisError(e, savedLocally = false)
                                 } finally {
                                     busy = false
                                 }
