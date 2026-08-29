@@ -1,0 +1,23 @@
+{
+  "name": "rin-repair-agent-backend",
+  "version": "1.0.0",
+  "description": "AI analysis, PPTX generation from RIN template, and PDF export for RIN Repair Agent",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "jszip": "^3.10.1",
+    "multer": "^1.4.5-lts.1",
+    "pdfkit": "^0.15.0",
+    "sharp": "^0.33.4",
+    "uuid": "^9.0.1"
+  }
+}

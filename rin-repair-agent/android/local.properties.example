@@ -1,0 +1,2 @@
+## Paste into android/local.properties (do not commit real machine paths if undesired)
+sdk.dir=/path/to/Android/Sdk
