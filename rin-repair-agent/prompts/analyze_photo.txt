@@ -1,28 +1,14 @@
-Проанализируй ОДНУ фотографию ремонта.
+Проанализируй ОДНУ эту фотографию ремонта по системным правилам.
 
 Контекст проекта (только для ориентации, не выдумывай по нему скрытые шаги):
 - Название ремонта: {{title}}
 - Изделие/модель: {{model}}
 - Номер фото: {{photoNumber}}
 
-Верни ТОЛЬКО валидный JSON без markdown:
-{
-  "photoNumber": {{photoNumber}},
-  "visibleObjects": ["..."],
-  "visibleAction": "...",
-  "repairStage": "...",
-  "tools": ["..."],
-  "beginnerInstruction": "Подробная пошаговая инструкция на русском для новичка: что сделать сначала, какую деталь найти, какой инструмент использовать, что удерживать, куда двигать, как снять/установить, как проверить, какое предупреждение соблюдать.",
-  "importantWarning": "...",
-  "confidence": 0.0,
-  "needsManualReview": false,
-  "beginnerInstructionEn": "Professional workshop repair instruction in English covering the same actions.",
-  "importantWarningEn": "...",
-  "repairStageEn": "...",
-  "visibleActionEn": "..."
-}
+В JSON поле photoNumber должно быть {{photoNumber}}.
 
-Если точное действие определить нельзя:
-beginnerInstruction = "Точное действие по этой фотографии определить невозможно. Требуется проверка мастером."
-needsManualReview = true
-confidence <= 0.4
+Дополнительно к обязательным полям системного формата заполни, если возможно:
+- "beginnerInstructionEn": английский перевод beginnerInstruction
+- "importantWarningEn": английский перевод importantWarning
+- "repairStageEn": английский перевод repairStage
+- "visibleActionEn": английский перевод visibleAction
