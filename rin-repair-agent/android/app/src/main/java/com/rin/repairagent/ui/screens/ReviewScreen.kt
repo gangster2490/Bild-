@@ -66,16 +66,21 @@ fun ReviewScreen(
     val addPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri ->
-        if (uri == null || project == null) return@rememberLauncherForActivityResult
+        if (uri == null) return@rememberLauncherForActivityResult
+        val id = projectId
         scope.launch {
             busy = true
+            error = null
             try {
-                var p = repository.addPhotoFromUri(project!!, uri)
+                val base = repository.loadProject(id) ?: error("Проект не найден")
+                var p = repository.addPhotoFromUri(base, uri)
                 val newId = p.photos.last().id
+                project = p
                 p = repository.analyzePhoto(p, newId)
                 project = p
             } catch (e: Exception) {
-                error = e.message
+                project = repository.loadProject(id)
+                error = "Фото сохранено локально, если импорт успел завершиться. ${e.message}"
             } finally {
                 busy = false
             }
@@ -87,14 +92,19 @@ fun ReviewScreen(
     ) { uri: Uri? ->
         val target = replaceTargetId
         replaceTargetId = null
-        if (uri == null || target == null || project == null) return@rememberLauncherForActivityResult
+        if (uri == null || target == null) return@rememberLauncherForActivityResult
+        val id = projectId
         scope.launch {
             busy = true
+            error = null
             try {
-                var p = repository.replacePhoto(project!!, target, uri)
+                val base = repository.loadProject(id) ?: error("Проект не найден")
+                var p = repository.replacePhoto(base, target, uri)
+                project = p
                 p = repository.analyzePhoto(p, target)
                 project = p
             } catch (e: Exception) {
+                project = repository.loadProject(id)
                 error = e.message
             } finally {
                 busy = false
