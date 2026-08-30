@@ -4,6 +4,9 @@ import com.rin.repairagent.data.model.RepairProject
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
@@ -12,6 +15,10 @@ import java.util.zip.ZipOutputStream
  * Builds a RIN PowerPoint by **copying the uploaded template PPTX** and changing
  * only text runs and picture binaries. Masters, theme, slide size, shapes,
  * geometry, colors, tables, lines, headers/footers and picture frames stay intact.
+ *
+ * Real Office files shuffle attribute order, put `xml:space="preserve"` on `<a:t>`,
+ * wrap pictures in `mc:AlternateContent`, keep titles in `p:graphicFrame` tables,
+ * and store viewProps/presProps beside slides in `presentation.xml.rels`.
  */
 object PptxRinWriter {
 
@@ -38,7 +45,6 @@ object PptxRinWriter {
     fun write(
         template: File,
         output: File,
-        @Suppress("UNUSED_PARAMETER")
         project: RepairProject,
         steps: List<ExportStep>,
         locale: String
@@ -67,21 +73,11 @@ object PptxRinWriter {
             SlideInfo(path, xml, parsePics(xml), parseTextShapes(xml), templateSize)
         }
 
-        val contentIdxs = infos.mapIndexedNotNull { i, info ->
-            if (info.contentPicture != null) i else null
-        }
-        val repeatIdx = contentIdxs.firstOrNull() ?: 0
+        val repeatIdx = pickRepeatingSlideIndex(infos)
         val prefix = infos.subList(0, repeatIdx)
-        val trailing = if (contentIdxs.isEmpty()) {
-            emptyList()
-        } else {
-            val lastContent = contentIdxs.last()
-            if (lastContent + 1 < infos.size) infos.subList(lastContent + 1, infos.size) else emptyList()
-        }
-
-        val prototype = infos[repeatIdx]
-        val protoRelsPath = relsForSlide(prototype.path)
-        val protoRels = parts[protoRelsPath]?.toString(Charsets.UTF_8) ?: emptyRels()
+        val cluster = contentCluster(infos, repeatIdx)
+        val trailing = trailingAfterCluster(infos, repeatIdx)
+        val prototype = cluster.first()
 
         var nextSlideNum = existingSlideNumbers(parts).maxOrNull() ?: 1
         var nextRelId = maxRid(relsXml) + 1
@@ -106,14 +102,17 @@ object PptxRinWriter {
             }
         }
 
-        prefix.forEach { info ->
+        val isRu = locale == "RU"
+        prefix.forEachIndexed { i, info ->
+            if (i == 0) {
+                parts[info.path] = fillCover(info.xml, project, isRu).toByteArray(Charsets.UTF_8)
+            }
             val origRid = relIdForTarget(relsXml, info.path.removePrefix("ppt/"))
                 ?: "rId${nextRelId++}"
             val origSld = sldIdForRid(presXml, origRid) ?: nextSldId++
             appendSlide(info.path, origRid, origSld)
         }
 
-        val isRu = locale == "RU"
         steps.forEachIndexed { index, step ->
             val filled = fillTexts(step, isRu)
             val photo = File(step.photo.localPath)
@@ -121,36 +120,49 @@ object PptxRinWriter {
                 "Фото ${step.photo.photoNumber} отсутствует"
             }
 
+            val source = if (index < cluster.size) cluster[index] else prototype
+            val clone = index >= cluster.size
             val slidePath: String
             val slideRelsPath: String
-            val sourceXml: String
-            val sourceRels: String
-            if (index == 0) {
-                slidePath = prototype.path
-                slideRelsPath = protoRelsPath
-                sourceXml = prototype.xml
-                sourceRels = protoRels
+            if (!clone) {
+                slidePath = source.path
+                slideRelsPath = relsForSlide(source.path)
             } else {
                 nextSlideNum++
+                while (parts.containsKey("ppt/slides/slide$nextSlideNum.xml")) nextSlideNum++
                 slidePath = "ppt/slides/slide$nextSlideNum.xml"
                 slideRelsPath = relsForSlide(slidePath)
-                sourceXml = prototype.xml
-                sourceRels = protoRels
             }
+            val sourceRels = parts[relsForSlide(source.path)]?.toString(Charsets.UTF_8) ?: emptyRels()
+            val sourceInfo = SlideInfo(
+                path = slidePath,
+                xml = source.xml,
+                pics = parsePics(source.xml),
+                texts = parseTextShapes(source.xml),
+                slideSize = templateSize
+            )
 
-            val mediaPath = "ppt/media/rin_step_${index + 1}.jpg"
+            val mediaPath = "ppt/media/rin_photo_${step.photo.photoNumber}.jpg"
             parts[mediaPath] = photo.readBytes()
-            val replaced = replaceContent(sourceXml, sourceRels, prototype, filled, mediaPath)
-            parts[slidePath] = replaced.slideXml.toByteArray(Charsets.UTF_8)
+            val replaced = replaceContent(
+                slideXml = source.xml,
+                relsXml = sourceRels,
+                info = sourceInfo,
+                texts = filled,
+                mediaPath = mediaPath,
+                imageRid = "rIdRinImg"
+            )
+            val xmlOut = if (clone) uniquifyCNvPrIds(replaced.slideXml, index * 10_000) else replaced.slideXml
+            parts[slidePath] = xmlOut.toByteArray(Charsets.UTF_8)
             parts[slideRelsPath] = replaced.relsXml.toByteArray(Charsets.UTF_8)
 
-            val relId = if (index == 0) {
-                relIdForTarget(relsXml, prototype.path.removePrefix("ppt/"))
+            val relId = if (!clone) {
+                relIdForTarget(relsXml, source.path.removePrefix("ppt/"))
                     ?: "rId${nextRelId++}"
             } else {
                 "rId${nextRelId++}"
             }
-            val sldId = if (index == 0) {
+            val sldId = if (!clone) {
                 sldIdForRid(presXml, relId) ?: nextSldId++
             } else {
                 nextSldId++
@@ -179,14 +191,18 @@ object PptxRinWriter {
 
     private data class Pic(
         val x: Long, val y: Long, val cx: Long, val cy: Long,
-        val embed: String, val block: String
+        val embed: String, val block: String,
+        val name: String = ""
     ) {
         val area: Long get() = cx * cy
     }
 
     private data class TextShape(
         val x: Long, val y: Long, val cx: Long, val cy: Long,
-        val fontSz: Int, val text: String, val block: String
+        val fontSz: Int, val text: String, val block: String,
+        val order: Int = 0,
+        val fromTable: Boolean = false,
+        val phType: String = ""
     )
 
     private data class SlideInfo(
@@ -199,35 +215,210 @@ object PptxRinWriter {
         val contentPicture: Pic?
             get() {
                 val (sw, sh) = slideSize
-                val slideArea = (sw * sh).takeIf { it > 0 } ?: return pics.maxByOrNull { it.area }
-                return pics.filter { it.area * 100 / slideArea >= 8 }.maxByOrNull { it.area }
+                val slideArea = (sw * sh).takeIf { it > 0 } ?: 1L
+                val content = pics.filter { isContentPic(it, slideArea) }
+                return content.maxByOrNull { it.area.coerceAtLeast(1L) }
+                    ?: pics.filter { it.embed.isNotBlank() && !looksLikeLogoPic(it, slideArea) }
+                        .maxByOrNull { it.area.coerceAtLeast(1L) }
             }
     }
 
     private data class ReplacedInner(val slideXml: String, val relsXml: String)
 
+    private fun pickRepeatingSlideIndex(infos: List<SlideInfo>): Int {
+        if (infos.isEmpty()) return 0
+        data class Score(val index: Int, val photoArea: Long, val photoPct: Long, val hint: Int)
+        val slideArea = infos.first().slideSize.let { (w, h) ->
+            (w * h).takeIf { it > 0 } ?: 1L
+        }
+        val scores = infos.mapIndexed { i, info ->
+            val pic = info.contentPicture
+            val area = pic?.area ?: 0L
+            val pct = area * 100 / slideArea
+            Score(i, area, pct, contentHint(info))
+        }
+        val withPhoto = scores.filter { it.photoPct >= MIN_PHOTO_PCT || it.hint >= 2 }
+        if (withPhoto.isEmpty()) {
+            return if (infos.size >= 2) 1 else 0
+        }
+        val bestHint = withPhoto.maxOf { it.hint }
+        val hinted = withPhoto.filter { it.hint == bestHint || it.hint >= 2 }
+        val pool = hinted.ifEmpty { withPhoto }
+        val clusterArea = pool.maxOf { it.photoArea }
+        val cluster = pool.filter {
+            it.photoArea >= clusterArea * 85 / 100 || (clusterArea == 0L && it.hint >= 2)
+        }
+        val notCover = cluster.filter { it.index > 0 }
+        return (notCover.minByOrNull { it.index } ?: cluster.minByOrNull { it.index })!!.index
+    }
+
+    private fun contentHint(info: SlideInfo): Int {
+        var hint = 0
+        val blob = info.texts.joinToString("\n") { it.text }.lowercase()
+        if (blob.contains("инструмент") || blob.contains("tool")) hint += 2
+        if (blob.contains("шаг") || blob.contains("step")) hint += 2
+        if (info.texts.size >= 3) hint += 1
+        if (info.contentPicture != null) hint += 1
+        val titleish = info.texts.maxByOrNull { it.fontSz }?.text.orEmpty().lowercase()
+        if (titleish.contains("rin") && info.texts.size <= 2) hint -= 2
+        return hint
+    }
+
+    private fun contentCluster(infos: List<SlideInfo>, repeatIdx: Int): List<SlideInfo> {
+        val last = lastClusterIndex(infos, repeatIdx)
+        return infos.subList(repeatIdx, last + 1)
+    }
+
+    private fun trailingAfterCluster(infos: List<SlideInfo>, repeatIdx: Int): List<SlideInfo> {
+        val last = lastClusterIndex(infos, repeatIdx)
+        return if (last + 1 < infos.size) infos.subList(last + 1, infos.size) else emptyList()
+    }
+
+    private fun lastClusterIndex(infos: List<SlideInfo>, repeatIdx: Int): Int {
+        if (repeatIdx >= infos.lastIndex) return repeatIdx
+        val protoArea = infos[repeatIdx].contentPicture?.area ?: return repeatIdx
+        var lastSame = repeatIdx
+        for (i in repeatIdx + 1 until infos.size) {
+            val area = infos[i].contentPicture?.area ?: break
+            if (area >= protoArea * 85 / 100 && area <= protoArea * 115 / 100) {
+                lastSame = i
+            } else {
+                break
+            }
+        }
+        return lastSame
+    }
+
+    private fun looksLikeLogoPic(pic: Pic, slideArea: Long): Boolean {
+        val n = pic.name.lowercase()
+        if (n.contains("logo") || n.contains("icon") || n.contains("wordmark")) return true
+        if (slideArea <= 0L) return false
+        if (pic.area <= 0L) return false
+        return pic.area * 100 / slideArea < LOGO_MAX_PCT
+    }
+
+    private fun isContentPic(pic: Pic, slideArea: Long): Boolean {
+        if (pic.embed.isBlank()) return false
+        if (looksLikeLogoPic(pic, slideArea)) return false
+        if (pic.area <= 0L) return true
+        return slideArea <= 0L || pic.area * 100 / slideArea >= MIN_PHOTO_PCT
+    }
+
     private fun replaceContent(
         slideXml: String,
         relsXml: String,
-        proto: SlideInfo,
+        info: SlideInfo,
         texts: FillTexts,
-        mediaPath: String
+        mediaPath: String,
+        imageRid: String
     ): ReplacedInner {
         var xml = slideXml
         var rels = relsXml
-        val pic = proto.contentPicture
-        if (pic != null && pic.embed.isNotBlank()) {
+        val pic = info.contentPicture
+        if (pic != null) {
             val target = "../media/${mediaPath.substringAfterLast('/')}"
-            rels = upsertImageRel(rels, pic.embed, target)
+            val slideArea = (info.slideSize.first * info.slideSize.second).takeIf { it > 0 } ?: 1L
+            val embeds = info.pics
+                .filter { candidate ->
+                    candidate.embed.isNotBlank() && (
+                        candidate.embed == pic.embed ||
+                            (isContentPic(candidate, slideArea) && candidate.area >= pic.area * 85 / 100)
+                        )
+                }
+                .map { it.embed }
+                .distinct()
+                .ifEmpty { listOf(pic.embed).filter { it.isNotBlank() } }
+            for (embed in embeds) {
+                xml = xml.replace("""r:embed="$embed"""", """r:embed="$imageRid"""")
+            }
+            rels = upsertImageRel(rels, imageRid, target)
+            for (embed in embeds) {
+                if (embed != imageRid) {
+                    rels = dropRel(rels, embed)
+                }
+            }
         }
 
-        val assignments = assignTexts(proto, texts)
+        val assignments = assignTexts(info, texts)
         for ((shape, value) in assignments) {
-            if (value.isBlank()) continue
-            val updated = replaceFirstAtText(shape.block, value)
-            xml = xml.replace(shape.block, updated)
+            val updated = replaceShapeText(shape.block, value)
+            xml = replaceFirstOccurrence(xml, shape.block, updated)
         }
         return ReplacedInner(xml, rels)
+    }
+
+    private fun fillCover(xml: String, project: RepairProject, isRu: Boolean): String {
+        val shapes = parseTextShapes(xml)
+        if (shapes.isEmpty()) return xml
+        val footerY = (projectSlideHeight(xml) * 88) / 100
+        val model = project.productModel.trim()
+        val usable = shapes.filter { shape ->
+            if (isLockedPlaceholder(shape)) return@filter false
+            if (looksLikeBrand(shape.text, model)) return@filter false
+            if (shape.y >= footerY && shape.text.length < 40) return@filter false
+            true
+        }
+        if (usable.isEmpty()) return xml
+
+        val titleShape = usable.filter {
+            it.phType in setOf("title", "ctrTitle") || looksLikeCoverTitle(it.text)
+        }.maxByOrNull { it.fontSz } ?: usable.maxByOrNull { it.fontSz }
+
+        val title = project.title.ifBlank {
+            if (isRu) "Инструкция по ремонту" else "Repair instruction"
+        }
+        val date = SimpleDateFormat("dd.MM.yyyy", Locale.US).format(Date(project.createdAt))
+
+        var out = xml
+        if (titleShape != null) {
+            out = replaceFirstOccurrence(out, titleShape.block, replaceShapeText(titleShape.block, title))
+        }
+        val rest = parseTextShapes(out).filter { shape ->
+            if (looksLikeBrand(shape.text, model) || isLockedPlaceholder(shape)) return@filter false
+            titleShape == null || shape.x != titleShape.x || shape.y != titleShape.y
+        }
+        for (shape in rest) {
+            val updated = rewriteCoverFields(shape.text, date, model)
+            if (updated != shape.text) {
+                out = replaceFirstOccurrence(out, shape.block, replaceShapeText(shape.block, updated))
+            }
+        }
+        return out
+    }
+
+    private fun projectSlideHeight(xml: String): Long {
+        val ext = EXT_RE.findAll(xml).map { attrLong(it.groupValues[1], "cy") }.maxOrNull() ?: 0L
+        return if (ext > 0) ext else 6_858_000L
+    }
+
+    private fun looksLikeCoverTitle(text: String): Boolean {
+        val t = text.trim()
+        if (t.isEmpty()) return false
+        val lower = t.lowercase()
+        if (lower.contains("автор") || lower.contains("author")) return false
+        if (lower.contains("утвержд") || lower.contains("approved")) return false
+        if (lower.contains("rin number") || lower.contains("version")) return false
+        if (lower.startsWith("www.")) return false
+        return t.length in 3..80
+    }
+
+    private fun rewriteCoverFields(text: String, date: String, model: String): String {
+        var out = text
+        val dateRe = Regex("""(?i)(Дата|Date)\s*:\s*\S+""")
+        if (dateRe.containsMatchIn(out)) {
+            out = dateRe.replace(out) { m ->
+                val label = m.groupValues[1]
+                "$label: $date"
+            }
+        }
+        val productRe = Regex("""(?i)(Продукт|Product)\s*:\s*.+""")
+        if (productRe.containsMatchIn(out)) {
+            out = productRe.replace(out) { m ->
+                val label = m.groupValues[1]
+                "$label: $model"
+            }
+        }
+        return out
     }
 
     private fun assignTexts(info: SlideInfo, fill: FillTexts): List<Pair<TextShape, String>> {
@@ -235,6 +426,7 @@ object PptxRinWriter {
         val pic = info.contentPicture
         val footerY = (sh * 88) / 100
         val usable = info.texts.filter { shape ->
+            if (isLockedPlaceholder(shape)) return@filter false
             val t = shape.text.trim()
             if (shape.y >= footerY && t.length < 40) return@filter false
             if (looksLikeBrand(t)) return@filter false
@@ -242,39 +434,78 @@ object PptxRinWriter {
         }
         if (usable.isEmpty()) return emptyList()
 
-        val caption = if (pic != null) {
+        val byPh = { type: String -> usable.firstOrNull { it.phType == type } }
+        val title = byPh("title") ?: byPh("ctrTitle")
+            ?: usable.filter {
+                it.text.contains("шаг", ignoreCase = true) || it.text.contains("step", ignoreCase = true)
+            }.maxByOrNull { it.fontSz }
+            ?: usable.maxByOrNull { it.fontSz }
+
+        val captionSlot = usable.firstOrNull { shape ->
+            val t = shape.text.lowercase()
+            t.contains("подпись") || t.contains("caption") ||
+                t.startsWith("фото ") || t.startsWith("photo ")
+        } ?: if (pic != null) {
             usable.filter {
-                it.y >= pic.y + pic.cy * 7 / 10 &&
+                it !== title &&
+                    it.y >= pic.y + pic.cy * 7 / 10 &&
                     it.x + it.cx >= pic.x &&
-                    it.x <= pic.x + pic.cx
+                    it.x <= pic.x + pic.cx &&
+                    it.cy < (sh / 8)
             }.minByOrNull { it.y }
         } else null
 
-        val rest = usable.filter { it !== caption }.sortedWith(compareBy({ it.y }, { it.x }))
-        val title = rest.maxByOrNull { it.fontSz } ?: rest.firstOrNull()
-        val afterTitle = rest.filter { it !== title }
+        val rest = usable.filter { it !== title && it !== captionSlot }
+            .sortedWith(compareBy({ it.y }, { it.x }, { it.order }))
 
-        val toolsShape = afterTitle.firstOrNull { s ->
+        val toolsShape = rest.firstOrNull { s ->
             val t = s.text.lowercase()
-            t.contains("инструмент") || t.contains("tool")
-        } ?: afterTitle.firstOrNull { it.cy < (sh / 10) && it !== title }
-
-        val warnShape = afterTitle.firstOrNull { s ->
-            val t = s.text.lowercase()
-            t.contains("важно") || t.contains("warning") || t.contains("⚠")
+            t.contains("инструмент") || t.contains("tool") || s.phType == "subTitle"
         }
+        val warnShape = rest.firstOrNull { s ->
+            val t = s.text.lowercase()
+            t.contains("важно") || t.contains("warning") || t.contains("⚠") ||
+                t.contains("проверьте") || t.contains("требуется")
+        }?.takeIf { it !== toolsShape }
 
-        val body = afterTitle
-            .filter { it !== toolsShape && it !== warnShape }
-            .maxByOrNull { it.cy * it.cx + it.text.length }
+        val body = byPh("body")
+            ?: rest.filter { it !== toolsShape && it !== warnShape }
+                .maxByOrNull { it.cy * it.cx + it.text.length * 100 }
+
+        val metaShape = toolsShape ?: warnShape
+        val bodyText = formatInstruction(fill.instruction, body?.let { shapeHasBullet(it.block) } == true)
+        val metaJoined = listOf(fill.tools, fill.warning).filter { it.isNotBlank() }.joinToString("\n")
 
         val result = mutableListOf<Pair<TextShape, String>>()
         title?.let { result += it to fill.title }
-        toolsShape?.let { result += it to fill.tools }
-        body?.let { result += it to fill.instruction }
-        warnShape?.let { result += it to fill.warning }
-        caption?.let { result += it to fill.caption }
-        return result
+        when {
+            toolsShape != null && warnShape != null && toolsShape !== warnShape -> {
+                result += toolsShape to fill.tools
+                result += warnShape to fill.warning
+            }
+            metaShape != null -> result += metaShape to metaJoined
+        }
+        val bodyWithWarn = if (metaShape == null && fill.warning.isNotBlank()) {
+            if (bodyText.isBlank()) fill.warning else "$bodyText\n${fill.warning}"
+        } else bodyText
+        body?.let { result += it to bodyWithWarn }
+        if (captionSlot != null && fill.caption.isNotBlank()) {
+            result += captionSlot to fill.caption
+        }
+        return result.distinctBy { it.first.block }
+    }
+
+    private fun isLockedPlaceholder(shape: TextShape): Boolean =
+        shape.phType in setOf("sldnum", "dt", "ftr", "hdr")
+
+    private fun shapeHasBullet(block: String): Boolean =
+        block.contains("<a:buChar") || block.contains("<a:buFont") || block.contains("<a:buAutoNum")
+
+    private fun formatInstruction(raw: String, hasBullet: Boolean): String {
+        val t = raw.trim()
+        if (t.isEmpty()) return ""
+        if (hasBullet || t.startsWith("•") || t.startsWith("- ")) return t
+        return "• $t"
     }
 
     private fun fillTexts(step: ExportStep, isRu: Boolean): FillTexts {
@@ -300,25 +531,39 @@ object PptxRinWriter {
             "Tools: ${step.analysis.tools.joinToString(" | ")}"
         }
         val instruction = if (isRu) step.instructionRu else step.instructionEn
-        val warning = if (isRu) {
-            step.analysis.importantWarning
-        } else {
-            step.analysis.importantWarningEn.ifBlank { step.analysis.importantWarning }
-        }
+        val warning = formatWarning(
+            if (isRu) step.analysis.importantWarning
+            else step.analysis.importantWarningEn.ifBlank { step.analysis.importantWarning },
+            isRu
+        )
         val caption = if (isRu) {
-            "Фото ${step.photo.photoNumber}: ${step.analysis.visibleAction.ifBlank { stage }}"
+            step.analysis.visibleAction
         } else {
-            "Photo ${step.photo.photoNumber}: ${
-                step.analysis.visibleActionEn.ifBlank { step.analysis.visibleAction.ifBlank { stage } }
-            }"
+            step.analysis.visibleActionEn.ifBlank { step.analysis.visibleAction }
         }
-        return FillTexts(title, tools, instruction, warning, caption)
+        return FillTexts(title, tools, instruction.trim(), warning, caption.trim())
     }
 
-    private fun looksLikeBrand(text: String): Boolean {
+    private fun formatWarning(raw: String, isRu: Boolean): String {
+        val t = raw.trim()
+        if (t.isEmpty()) return ""
+        val lower = t.lowercase()
+        if (lower.startsWith("важно") || lower.startsWith("warning") || t.startsWith("⚠")) return t
+        if (lower.contains("проверьте") || lower.contains("требуется") ||
+            lower.contains("check before") || lower.contains("required")
+        ) return t
+        return if (isRu) "Важно: $t" else "Warning: $t"
+    }
+
+    private fun looksLikeBrand(text: String, model: String = ""): Boolean {
         val t = text.trim()
-        return t.length in 2..18 && t.none { it.isWhitespace() } &&
-            t.uppercase() == t && t.any { it.isLetter() }
+        if (t.isEmpty()) return false
+        if (model.isNotBlank() && t.equals(model, ignoreCase = true)) return true
+        if (t.length !in 2..24 || t.any { it.isWhitespace() }) return false
+        val letters = t.filter { it.isLetter() }
+        if (letters.length < 3) return false
+        val upper = letters.count { it.isUpperCase() }
+        return upper * 2 >= letters.length
     }
 
     fun hasPresentationXml(file: File): Boolean {
@@ -359,6 +604,12 @@ object PptxRinWriter {
         }
         val framesOk = pictureFramesMatch(tplParts, outParts)
         if (!framesOk) errors += "Рамки фотографий (положение/размер) изменились"
+        val outRels = outParts["ppt/_rels/presentation.xml.rels"]?.toString(Charsets.UTF_8).orEmpty()
+        val tplRels = tplParts["ppt/_rels/presentation.xml.rels"]?.toString(Charsets.UTF_8).orEmpty()
+        val lost = keptNonSlideTargets(tplRels) - keptNonSlideTargets(outRels)
+        if (lost.isNotEmpty()) {
+            errors += "Потеряны связи шаблона: ${lost.joinToString()}"
+        }
         return DesignCheck(
             templateSlideCount = templateSlideCount,
             outputSlideCount = outputSlideCount,
@@ -369,6 +620,12 @@ object PptxRinWriter {
             errors = errors
         )
     }
+
+    private fun keptNonSlideTargets(relsXml: String): Set<String> =
+        parseRelationships(relsXml)
+            .filterNot { isSlideRel(it.type) }
+            .map { it.target.replace('\\', '/') }
+            .toSet()
 
     private fun pictureFramesMatch(
         template: Map<String, ByteArray>,
@@ -426,79 +683,150 @@ object PptxRinWriter {
     }
 
     private fun slideOrder(presXml: String, relsXml: String): List<String> {
-        val idToTarget = HashMap<String, String>()
-        REL_RE.findAll(relsXml).forEach { m ->
-            val attrs = m.groupValues[1]
-            val id = attr(attrs, "Id") ?: return@forEach
-            val type = attr(attrs, "Type").orEmpty()
-            val target = attr(attrs, "Target").orEmpty().replace('\\', '/')
-            if (type.endsWith("/slide") && !type.contains("slideMaster") && !type.contains("slideLayout")) {
-                val path = if (target.startsWith("ppt/")) target else "ppt/" + target.removePrefix("/")
-                idToTarget[id] = path
+        val idToTarget = linkedMapOf<String, String>()
+        parseRelationships(relsXml).forEach { rel ->
+            if (!isSlideRel(rel.type)) return@forEach
+            val target = rel.target.replace('\\', '/')
+            val path = if (target.startsWith("ppt/")) target else "ppt/" + target.removePrefix("/")
+            idToTarget[rel.id] = path
+        }
+        val ordered = parseSlideIds(presXml).mapNotNull { idToTarget[it.rId] }
+        return ordered.ifEmpty {
+            idToTarget.values.sortedBy { path ->
+                SLIDE_FILE_RE.matchEntire(path)?.groupValues?.get(1)?.toIntOrNull() ?: Int.MAX_VALUE
             }
         }
-        val ordered = SLD_ID_RE.findAll(presXml).mapNotNull { m ->
-            idToTarget[m.groupValues[2]]
-        }.toList()
-        return ordered.ifEmpty { idToTarget.values.toList() }
     }
 
     private fun parsePics(xml: String): List<Pic> {
         return PIC_RE.findAll(xml).mapNotNull { m ->
             val block = m.value
             val embed = EMBED_RE.find(block)?.groupValues?.get(1).orEmpty()
-            val xfrm = XFRM_RE.find(block)?.value ?: return@mapNotNull null
-            val off = OFF_RE.find(xfrm) ?: return@mapNotNull null
-            val ext = EXT_RE.find(xfrm) ?: return@mapNotNull null
-            Pic(
-                x = off.groupValues[1].toLongOrNull() ?: 0L,
-                y = off.groupValues[2].toLongOrNull() ?: 0L,
-                cx = ext.groupValues[1].toLongOrNull() ?: 0L,
-                cy = ext.groupValues[2].toLongOrNull() ?: 0L,
-                embed = embed,
-                block = block
-            )
+            val xfrm = XFRM_RE.findAll(block).lastOrNull()?.value
+            val off = xfrm?.let { OFF_RE.find(it) }
+            val ext = xfrm?.let { EXT_RE.find(it) }
+            val x = off?.let { attrLong(it.groupValues[1], "x") } ?: 0L
+            val y = off?.let { attrLong(it.groupValues[1], "y") } ?: 0L
+            val cx = ext?.let { attrLong(it.groupValues[1], "cx") } ?: 0L
+            val cy = ext?.let { attrLong(it.groupValues[1], "cy") } ?: 0L
+            if (embed.isBlank() && cx == 0L && cy == 0L) return@mapNotNull null
+            val name = CNVPR_RE.find(block)?.let { attr(it.value, "name") }.orEmpty()
+            Pic(x = x, y = y, cx = cx, cy = cy, embed = embed, block = block, name = name)
         }.toList()
     }
 
     private fun parseTextShapes(xml: String): List<TextShape> {
-        return SP_RE.findAll(xml).mapNotNull { m ->
-            val block = m.value
-            if (!block.contains("<p:txBody") && !block.contains("<a:t")) return@mapNotNull null
-            val xfrm = XFRM_RE.find(block)?.value
-            val off = xfrm?.let { OFF_RE.find(it) }
-            val ext = xfrm?.let { EXT_RE.find(it) }
-            val texts = T_RE.findAll(block).map { it.groupValues[1] }.joinToString("")
-            val sz = SZ_RE.findAll(block).mapNotNull { it.groupValues[1].toIntOrNull() }.maxOrNull() ?: 0
-            TextShape(
-                x = off?.groupValues?.get(1)?.toLongOrNull() ?: 0L,
-                y = off?.groupValues?.get(2)?.toLongOrNull() ?: 0L,
-                cx = ext?.groupValues?.get(1)?.toLongOrNull() ?: 0L,
-                cy = ext?.groupValues?.get(2)?.toLongOrNull() ?: 0L,
-                fontSz = sz,
-                text = unescape(texts),
-                block = block
-            )
-        }.toList()
+        val out = mutableListOf<TextShape>()
+        var order = 0
+        SP_RE.findAll(xml).forEach { m ->
+            toTextShape(m.value, order++, fromTable = false)?.let { out += it }
+        }
+        GF_RE.findAll(xml).forEach { m ->
+            val frame = m.value
+            val cells = TC_RE.findAll(frame).toList()
+            if (cells.size > 1) {
+                cells.forEach { cell ->
+                    toTextShape(cell.value, order++, fromTable = true)?.let { out += it }
+                }
+            } else {
+                toTextShape(frame, order++, fromTable = true)?.let { out += it }
+            }
+        }
+        return out
     }
 
-    private fun replaceFirstAtText(shapeXml: String, newText: String): String {
+    private fun toTextShape(block: String, order: Int, fromTable: Boolean): TextShape? {
+        if (!block.contains("<a:t") && !block.contains("<p:txBody") && !block.contains("<a:txBody")) {
+            return null
+        }
+        val xfrm = XFRM_RE.find(block)?.value
+        val off = xfrm?.let { OFF_RE.find(it) }
+        val ext = xfrm?.let { EXT_RE.find(it) }
+        val texts = T_RE.findAll(block).map { it.groupValues[2] }.joinToString("")
+        val sz = SZ_RE.findAll(block).mapNotNull { it.groupValues[1].toIntOrNull() }.maxOrNull() ?: 0
+        val phType = PH_RE.find(block)?.let { attr(it.groupValues[1], "type") }.orEmpty().lowercase()
+        return TextShape(
+            x = off?.let { attrLong(it.groupValues[1], "x") } ?: 0L,
+            y = off?.let { attrLong(it.groupValues[1], "y") } ?: 0L,
+            cx = ext?.let { attrLong(it.groupValues[1], "cx") } ?: 0L,
+            cy = ext?.let { attrLong(it.groupValues[1], "cy") } ?: 0L,
+            fontSz = sz,
+            text = unescape(texts),
+            block = block,
+            order = order,
+            fromTable = fromTable,
+            phType = phType
+        )
+    }
+
+    private fun replaceShapeText(shapeXml: String, newText: String): String {
+        val txMatch = TX_BODY_RE.find(shapeXml) ?: return replaceFirstAtText(shapeXml, newText)
+        val body = txMatch.value
+        val firstP = P_RE.find(body)?.value.orEmpty()
+        val rPr = Regex("""<a:rPr\b[^>]*(?:/>|>[\s\S]*?</a:rPr>)""").find(firstP)?.value
+            ?: Regex("""<a:endParaRPr\b[^>]*(?:/>|>[\s\S]*?</a:endParaRPr>)""").find(firstP)?.value
+                ?.replace("endParaRPr", "rPr")
+            ?: """<a:rPr lang="ru-RU"/>"""
+        val pPr = Regex("""<a:pPr\b[^>]*(?:/>|>[\s\S]*?</a:pPr>)""").find(firstP)?.value.orEmpty()
+        val open = Regex("""<(p:txBody|a:txBody)\b[^>]*>""").find(body)?.value ?: return shapeXml
+        val close = if (open.startsWith("<p:")) "</p:txBody>" else "</a:txBody>"
+        val bodyPr = Regex("""<a:bodyPr\b[^>]*(?:/>|>[\s\S]*?</a:bodyPr>)""").find(body)?.value ?: "<a:bodyPr/>"
+        val lst = Regex("""<a:lstStyle\s*/>|<a:lstStyle>[\s\S]*?</a:lstStyle>""").find(body)?.value ?: "<a:lstStyle/>"
+        val lines = if (newText.isEmpty()) listOf("") else newText.split('\n')
+        val paras = lines.joinToString("") { line ->
+            val t = wrapT(if (line.isEmpty()) "" else """ xml:space="preserve"""", escape(line), line)
+            "<a:p>$pPr<a:r>$rPr$t</a:r></a:p>"
+        }
+        val newBody = "$open$bodyPr$lst$paras$close"
+        return shapeXml.replaceRange(txMatch.range, newBody)
+    }
+
+    private fun replaceFirstAtText(shapeXml: String, newText: String, clearRest: Boolean = true): String {
         val escaped = escape(newText)
         var already = false
-        return T_RE.replace(shapeXml) {
+        val replaced = T_RE.replace(shapeXml) { m ->
+            val openAttrs = m.groupValues[1]
             if (!already) {
                 already = true
-                "<a:t>$escaped</a:t>"
+                wrapT(openAttrs, escaped, newText)
+            } else if (clearRest) {
+                wrapT(openAttrs, "", "")
             } else {
-                "<a:t></a:t>"
+                m.value
             }
+        }
+        return replaced
+    }
+
+    private fun wrapT(openAttrs: String, escaped: String, raw: String): String {
+        val needsPreserve = raw.isNotEmpty() && (
+            raw.first().isWhitespace() || raw.last().isWhitespace() || raw.contains('\n')
+            )
+        val attrs = when {
+            openAttrs.contains("xml:space") -> openAttrs
+            needsPreserve -> """ xml:space="preserve"$openAttrs"""
+            else -> openAttrs
+        }
+        return "<a:t$attrs>$escaped</a:t>"
+    }
+
+    private fun replaceFirstOccurrence(haystack: String, needle: String, replacement: String): String {
+        val i = haystack.indexOf(needle)
+        if (i < 0) return haystack
+        return haystack.substring(0, i) + replacement + haystack.substring(i + needle.length)
+    }
+
+    private fun uniquifyCNvPrIds(xml: String, offset: Int): String {
+        return CNVPR_RE.replace(xml) { m ->
+            val tag = m.value
+            val id = attr(tag, "id")?.toIntOrNull() ?: return@replace tag
+            tag.replaceFirst(Regex("""\bid="\d+""""), """id="${id + offset}"""")
         }
     }
 
     private fun upsertImageRel(relsXml: String, embedId: String, target: String): String {
-        val has = REL_RE.findAll(relsXml).any { m ->
-            attr(m.groupValues[1], "Id") == embedId
-        }
+        val rels = parseRelationships(relsXml)
+        val has = rels.any { it.id == embedId }
         return if (has) {
             REL_RE.replace(relsXml) { m ->
                 val attrs = m.groupValues[1]
@@ -521,14 +849,15 @@ object PptxRinWriter {
         }
     }
 
+    private fun dropRel(relsXml: String, embedId: String): String =
+        REL_RE.replace(relsXml) { m ->
+            if (attr(m.groupValues[1], "Id") == embedId) "" else m.value
+        }
+
     private fun rewritePresentationRels(original: String, slideRels: String): String {
         val kept = REL_RE.findAll(original).mapNotNull { m ->
             val type = attr(m.groupValues[1], "Type").orEmpty()
-            if (type.endsWith("/slide") && !type.contains("slideMaster") && !type.contains("slideLayout")) {
-                null
-            } else {
-                m.value
-            }
+            if (isSlideRel(type)) null else m.value
         }.joinToString("")
         val body = kept + slideRels
         val openTag = Regex("""<Relationships[^>]*>""").find(original)?.value
@@ -561,14 +890,16 @@ object PptxRinWriter {
 
     private fun readSlideSize(presXml: String): Pair<Long, Long> {
         val m = SLD_SZ_RE.find(presXml) ?: return 12_192_000L to 6_858_000L
-        val cx = m.groupValues[1].toLongOrNull() ?: 12_192_000L
-        val cy = m.groupValues[2].toLongOrNull() ?: 6_858_000L
+        val attrs = m.groupValues[1]
+        val cx = attrLong(attrs, "cx").takeIf { it > 0 } ?: 12_192_000L
+        val cy = attrLong(attrs, "cy").takeIf { it > 0 } ?: 6_858_000L
         return cx to cy
     }
 
     private fun relsForSlide(slidePath: String): String {
         val name = slidePath.substringAfterLast('/')
-        return "ppt/slides/_rels/$name.rels"
+        val dir = slidePath.substringBeforeLast('/', missingDelimiterValue = "")
+        return if (dir.isEmpty()) "_rels/$name.rels" else "$dir/_rels/$name.rels"
     }
 
     private fun existingSlideNumbers(parts: Map<String, ByteArray>): List<Int> =
@@ -577,37 +908,58 @@ object PptxRinWriter {
         }
 
     private fun maxRid(relsXml: String): Int =
-        REL_RE.findAll(relsXml).mapNotNull { m ->
-            attr(m.groupValues[1], "Id")?.removePrefix("rId")?.toIntOrNull()
+        parseRelationships(relsXml).mapNotNull { rel ->
+            rel.id.removePrefix("rId").toIntOrNull()
         }.maxOrNull() ?: 10
 
     private fun maxSldId(presXml: String): Int =
-        SLD_ID_RE.findAll(presXml).mapNotNull { it.groupValues[1].toIntOrNull() }.maxOrNull() ?: 256
+        parseSlideIds(presXml).map { it.id }.maxOrNull() ?: 256
 
     private fun relIdForTarget(relsXml: String, targetSuffix: String): String? {
         val want = targetSuffix.replace('\\', '/')
-        return REL_RE.findAll(relsXml).firstNotNullOfOrNull { m ->
-            val target = attr(m.groupValues[1], "Target")?.replace('\\', '/') ?: return@firstNotNullOfOrNull null
-            if (target == want || target.endsWith(want) || want.endsWith(target)) {
-                attr(m.groupValues[1], "Id")
-            } else {
-                null
-            }
+        return parseRelationships(relsXml).firstNotNullOfOrNull { rel ->
+            val target = rel.target.replace('\\', '/')
+            if (target == want || target.endsWith(want) || want.endsWith(target)) rel.id else null
         }
     }
 
     private fun sldIdForRid(presXml: String, rid: String): Int? =
-        SLD_ID_RE.findAll(presXml).firstNotNullOfOrNull { m ->
-            if (m.groupValues[2] == rid) m.groupValues[1].toIntOrNull() else null
-        }
+        parseSlideIds(presXml).firstOrNull { it.rId == rid }?.id
 
     private fun emptyRels(): String =
         """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"""
 
+    private data class Rel(val id: String, val type: String, val target: String)
+    private data class SlideId(val id: Int, val rId: String)
+
+    private fun parseRelationships(xml: String): List<Rel> =
+        REL_RE.findAll(xml).mapNotNull { m ->
+            val attrs = m.groupValues[1]
+            val id = attr(attrs, "Id") ?: return@mapNotNull null
+            val type = attr(attrs, "Type").orEmpty()
+            val target = attr(attrs, "Target") ?: return@mapNotNull null
+            Rel(id, type, target)
+        }.toList()
+
+    private fun parseSlideIds(xml: String): List<SlideId> =
+        SLD_ID_RE.findAll(xml).mapNotNull { m ->
+            val attrs = m.groupValues[1]
+            val id = attr(attrs, "id")?.toIntOrNull() ?: return@mapNotNull null
+            val rId = attr(attrs, "r:id") ?: return@mapNotNull null
+            SlideId(id, rId)
+        }.toList()
+
+    private fun isSlideRel(type: String): Boolean =
+        type.endsWith("/slide") && !type.contains("slideMaster") && !type.contains("slideLayout")
+
     private fun attr(attrs: String, name: String): String? {
-        val m = Regex("""\b$name="([^"]*)"""").find(attrs) ?: return null
+        // Require start-or-whitespace so `id=` does not match `r:id=` (Office often writes r:id first).
+        val m = Regex("""(?:^|[\s])${Regex.escape(name)}="([^"]*)"""").find(attrs) ?: return null
         return m.groupValues[1]
     }
+
+    private fun attrLong(attrs: String, name: String): Long =
+        attr(attrs, name)?.toLongOrNull() ?: 0L
 
     private fun escape(s: String): String = s
         .replace("&", "&amp;")
@@ -621,17 +973,27 @@ object PptxRinWriter {
         .replace("&quot;", "\"")
         .replace("&amp;", "&")
 
-    private val REL_RE = Regex("""<Relationship\s+([^>]+?)\s*/>""")
-    private val SLD_ID_RE = Regex("""<p:sldId\s+id="(\d+)"\s+r:id="([^"]+)"""")
+    private const val MIN_PHOTO_PCT = 8L
+    private const val LOGO_MAX_PCT = 7L
+
+    /** Self-closing or paired Relationship, attributes in any order, possibly multiline. */
+    private val REL_RE = Regex("""<Relationship\b([^>]*?)(?:/>|>[\s\S]*?</Relationship>)""")
+    private val SLD_ID_RE = Regex("""<p:sldId\b([^>]*?)/?>""")
     private val SLD_LST_RE = Regex("""<p:sldIdLst>[\s\S]*?</p:sldIdLst>""")
-    private val SLD_SZ_RE = Regex("""<p:sldSz[^>]*\bcx="(\d+)"[^>]*\bcy="(\d+)"""")
-    private val PIC_RE = Regex("""<p:pic>[\s\S]*?</p:pic>""")
-    private val SP_RE = Regex("""<p:sp>[\s\S]*?</p:sp>""")
-    private val XFRM_RE = Regex("""<a:xfrm>[\s\S]*?</a:xfrm>""")
-    private val OFF_RE = Regex("""<a:off[^>]*\bx="(\d+)"[^>]*\by="(\d+)"""")
-    private val EXT_RE = Regex("""<a:ext[^>]*\bcx="(\d+)"[^>]*\bcy="(\d+)"""")
+    private val SLD_SZ_RE = Regex("""<p:sldSz\b([^>]*)/?>""")
+    private val PIC_RE = Regex("""<p:pic\b[^>]*>[\s\S]*?</p:pic>""")
+    private val SP_RE = Regex("""<p:sp\b[^>]*>[\s\S]*?</p:sp>""")
+    private val GF_RE = Regex("""<p:graphicFrame\b[^>]*>[\s\S]*?</p:graphicFrame>""")
+    private val TC_RE = Regex("""<a:tc\b[^>]*>[\s\S]*?</a:tc>""")
+    private val XFRM_RE = Regex("""<(?:a|p):xfrm\b[^>]*>[\s\S]*?</(?:a|p):xfrm>""")
+    private val OFF_RE = Regex("""<a:off\b([^>]*)/?>""")
+    private val EXT_RE = Regex("""<a:ext\b([^>]*)/?>""")
     private val EMBED_RE = Regex("""r:embed="([^"]+)"""")
-    private val T_RE = Regex("""<a:t>([\s\S]*?)</a:t>""")
+    private val T_RE = Regex("""<a:t(\s[^>]*)?>([\s\S]*?)</a:t>""")
     private val SZ_RE = Regex("""\bsz="(\d+)"""")
     private val SLIDE_FILE_RE = Regex("""ppt/slides/slide(\d+)\.xml""")
+    private val CNVPR_RE = Regex("""<p:cNvPr\b[^>]*>""")
+    private val PH_RE = Regex("""<p:ph\b([^>]*)/?>""")
+    private val TX_BODY_RE = Regex("""<(p:txBody|a:txBody)\b[^>]*>[\s\S]*?</(?:p:txBody|a:txBody)>""")
+    private val P_RE = Regex("""<a:p\b[^>]*>[\s\S]*?</a:p>""")
 }
