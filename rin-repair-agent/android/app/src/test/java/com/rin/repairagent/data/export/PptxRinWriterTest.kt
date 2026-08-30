@@ -141,6 +141,8 @@ class PptxRinWriterTest {
             assertTrue(pres.contains("cx=\"12192000\""))
             assertTrue(pres.contains("cy=\"6858000\""))
             assertEquals(4, Regex("""<p:sldId\b""").findAll(pres).count())
+            assertTrue(pres.contains("""id="256"""") && pres.contains("""r:id="rId2""""))
+            assertTrue(pres.contains("""id="257"""") && pres.contains("""r:id="rId3""""))
             val slide2 = zip.getInputStream(zip.getEntry("ppt/slides/slide2.xml")).bufferedReader().readText()
             assertTrue(slide2.contains("y=\"800000\"") && slide2.contains("x=\"400000\""))
             assertTrue(slide2.contains("cx=\"5000000\"") && slide2.contains("cy=\"4000000\""))

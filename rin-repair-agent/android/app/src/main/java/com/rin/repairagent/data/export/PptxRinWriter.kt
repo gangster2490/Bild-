@@ -512,7 +512,7 @@ object PptxRinWriter {
     }
 
     private fun slideOrder(presXml: String, relsXml: String): List<String> {
-        val idToTarget = HashMap<String, String>()
+        val idToTarget = linkedMapOf<String, String>()
         parseRelationships(relsXml).forEach { rel ->
             if (!isSlideRel(rel.type)) return@forEach
             val target = rel.target.replace('\\', '/')
@@ -520,7 +520,11 @@ object PptxRinWriter {
             idToTarget[rel.id] = path
         }
         val ordered = parseSlideIds(presXml).mapNotNull { idToTarget[it.rId] }
-        return ordered.ifEmpty { idToTarget.values.toList() }
+        return ordered.ifEmpty {
+            idToTarget.values.sortedBy { path ->
+                SLIDE_FILE_RE.matchEntire(path)?.groupValues?.get(1)?.toIntOrNull() ?: Int.MAX_VALUE
+            }
+        }
     }
 
     private fun parsePics(xml: String): List<Pic> {
@@ -747,7 +751,8 @@ object PptxRinWriter {
         type.endsWith("/slide") && !type.contains("slideMaster") && !type.contains("slideLayout")
 
     private fun attr(attrs: String, name: String): String? {
-        val m = Regex("""\b${Regex.escape(name)}="([^"]*)"""").find(attrs) ?: return null
+        // Require start-or-whitespace so `id=` does not match `r:id=` (Office often writes r:id first).
+        val m = Regex("""(?:^|[\s])${Regex.escape(name)}="([^"]*)"""").find(attrs) ?: return null
         return m.groupValues[1]
     }
 
