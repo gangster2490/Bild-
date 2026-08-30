@@ -104,8 +104,9 @@ class OpenAiClient(
         )
 
         val gpt5 = OpenAiModelCatalog.isGpt5Family(model)
+        val tokenLimit = OpenAiModelCatalog.completionBudget(model, maxTokens)
         val requestBody = buildJsonObject {
-            put("model", JsonPrimitive(model))
+            put("model", JsonPrimitive(OpenAiModelCatalog.sanitize(model)))
             put("messages", json.encodeToJsonElement(messages))
             if (jsonMode) {
                 put("response_format", buildJsonObject {
@@ -113,11 +114,11 @@ class OpenAiClient(
                 })
             }
             if (gpt5) {
-                put("max_completion_tokens", JsonPrimitive(maxTokens))
+                put("max_completion_tokens", JsonPrimitive(tokenLimit))
                 put("reasoning_effort", JsonPrimitive(OpenAiModelCatalog.reasoningEffort(model)))
             } else {
                 put("temperature", JsonPrimitive(temperature))
-                put("max_tokens", JsonPrimitive(maxTokens))
+                put("max_tokens", JsonPrimitive(tokenLimit))
             }
         }
 

@@ -290,7 +290,7 @@ fun SettingsScreen(
                 Text("OpenAI Model", style = type.cardTitle.copy(color = VppColors.textLight))
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Используется для анализа фото и VEO Prompt.",
+                    "GPT-5.6 Sol / Terra / Luna для анализа фото и VEO Prompt. По умолчанию gpt-5.6-sol.",
                     style = type.secondary.copy(color = VppColors.textMuted, fontSize = 12.sp)
                 )
                 Spacer(Modifier.height(12.dp))
@@ -330,8 +330,15 @@ fun SettingsScreen(
                                 maxLines = 1
                             )
                         }
-                        if (selected) {
-                            StatusPill("Выбран ✓", success = true)
+                        when {
+                            selected -> StatusPill("Выбран ✓", success = true)
+                            option.recommended -> Text(
+                                "рекомендуется",
+                                style = type.secondary.copy(
+                                    color = VppColors.accentPurple,
+                                    fontSize = 11.sp
+                                )
+                            )
                         }
                     }
                 }
@@ -360,7 +367,7 @@ fun SettingsScreen(
                 Text("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", style = type.cardTitle.copy(color = VppColors.textLight))
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Private VEO 3.1 prompt generator · 3.2",
+                    "Private VEO 3.1 prompt generator · 3.2.1",
                     style = type.secondary.copy(color = VppColors.textMuted)
                 )
             }
