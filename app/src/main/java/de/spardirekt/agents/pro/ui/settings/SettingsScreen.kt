@@ -317,7 +317,7 @@ fun SettingsScreen(
                 Text("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", style = type.cardTitle.copy(color = VppColors.textLight))
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Private VEO 3.1 prompt generator · 3.0",
+                    "Private VEO 3.1 prompt generator · 3.1",
                     style = type.secondary.copy(color = VppColors.textMuted)
                 )
             }
