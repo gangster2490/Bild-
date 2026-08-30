@@ -312,7 +312,11 @@ class RinRepository(
                 errors += "Фото ${p.photoNumber}: пустое описание"
             }
         }
-        if (storage.templateFile() == null) errors += "RIN-шаблон не добавлен"
+        if (storage.templateFile() == null ||
+            !com.rin.repairagent.util.TemplateFileHelper.looksLikePptxZip(storage.templateFile()!!)
+        ) {
+            errors += "RIN-шаблон PowerPoint не загружен (нужен файл с ppt/presentation.xml)"
+        }
 
         return ExportValidation(
             loadedPhotos = loaded,

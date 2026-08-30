@@ -11,6 +11,7 @@ import com.rin.repairagent.data.model.RepairProject
 import com.rin.repairagent.data.model.TemplateInfo
 import com.rin.repairagent.util.ImageNormalizer
 import com.rin.repairagent.util.TemplateFileHelper
+import com.rin.repairagent.util.TemplateKind
 import com.rin.repairagent.util.UriIO
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -78,42 +79,32 @@ class AppStorage(private val context: Context) {
     suspend fun importTemplate(uri: Uri, displayName: String): TemplateInfo = withContext(Dispatchers.IO) {
         UriIO.tryTakeReadPermission(context, uri)
 
-        // 1) Always copy to cache first (content:// streams are unreliable later)
+        val resolverName = UriIO.displayName(context, uri, "").ifBlank { displayName }
         val cacheCopy = UriIO.copyUriToCache(context, uri, "rin_template", ".bin")
         try {
             require(cacheCopy.length() > 0L) { "Загруженный шаблон пустой" }
 
-            // If user uploaded a ZIP that wraps a PPTX, unwrap it before detection
             val working = File(
                 cacheCopy.parentFile,
                 "rin_template_unwrapped_${UUID.randomUUID()}.pptx"
             )
             val unwrapped = TemplateFileHelper.extractNestedPptx(cacheCopy, working)
             val source = if (unwrapped) working else cacheCopy
-            val preferredName = when {
-                unwrapped && displayName.isBlank() -> "rin_template.pptx"
-                unwrapped && !displayName.lowercase().endsWith(".pptx") ->
-                    displayName.substringBeforeLast('.', displayName) + ".pptx"
-                else -> displayName
-            }
 
-            val detected = TemplateFileHelper.detect(context, uri, source, preferredName)
+            val detected = TemplateFileHelper.detect(context, uri, source, resolverName)
 
-            // 2) Store under stable name; PPTX always as rin_template.pptx for exporters
-            val dest = templatesDir.resolve("rin_template.${detected.extension}")
-            // Remove previous template variants so templateFile() cannot pick a stale file
             templatesDir.listFiles()?.forEach { existing ->
-                if (existing.isFile && existing.name.startsWith("rin_template")) {
-                    existing.delete()
-                }
+                if (existing.isFile) existing.delete()
             }
 
+            val destName = sanitizeStoredName(detected.displayName, detected.extension)
+            val dest = templatesDir.resolve(destName)
             source.copyTo(dest, overwrite = true)
             require(dest.exists() && dest.length() > 0L) { "Не удалось сохранить шаблон" }
 
-            if (detected.extension == "pptx") {
+            if (detected.kind == TemplateKind.PPTX || detected.kind == TemplateKind.PPT) {
                 require(TemplateFileHelper.looksLikePptxZip(dest)) {
-                    "Сохранённый файл повреждён или это не PPTX"
+                    "В сохранённом файле нет ppt/presentation.xml"
                 }
             }
 
@@ -141,15 +132,25 @@ class AppStorage(private val context: Context) {
     }
 
     fun templateFile(): File? {
-        // Prefer validated pptx
-        val pptx = templatesDir.resolve("rin_template.pptx")
-        if (pptx.exists() && pptx.length() > 0L) return pptx
-        // Fall back to any stored template; if ZIP is actually pptx content, still usable
+        val pptx = templatesDir.resolve("RIN_Template.pptx")
+        if (pptx.exists() && pptx.length() > 0L && TemplateFileHelper.looksLikePptxZip(pptx)) return pptx
+        val legacy = templatesDir.resolve("rin_template.pptx")
+        if (legacy.exists() && legacy.length() > 0L && TemplateFileHelper.looksLikePptxZip(legacy)) return legacy
         val candidates = templatesDir.listFiles()
-            ?.filter { it.isFile && it.length() > 0L && it.name.startsWith("rin_template") }
+            ?.filter { it.isFile && it.length() > 0L }
             .orEmpty()
         candidates.firstOrNull { TemplateFileHelper.looksLikePptxZip(it) }?.let { return it }
         return candidates.firstOrNull()
+    }
+
+    private fun sanitizeStoredName(displayName: String, extension: String): String {
+        val raw = displayName.substringAfterLast('/').substringAfterLast('\\').trim()
+        val cleaned = raw.replace(Regex("""[\\/:*?"<>|]"""), "_")
+        return when {
+            cleaned.isNotBlank() -> cleaned
+            extension.isNotBlank() -> "template.$extension"
+            else -> "template.pptx"
+        }
     }
 
     suspend fun listProjects(): List<RepairProject> = withContext(Dispatchers.IO) {
@@ -297,7 +298,7 @@ class AppStorage(private val context: Context) {
 
     companion object {
         const val DEFAULT_SERVER = "http://10.0.2.2:3000"
-        val ALLOWED_TEMPLATE_EXT = setOf("pptx", "zip", "json", "pdf")
+        val ALLOWED_TEMPLATE_EXT = setOf("pptx", "ppt", "zip", "json", "pdf")
         private val IMAGE_EXT = listOf(".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif")
     }
 }

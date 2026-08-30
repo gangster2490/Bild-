@@ -50,6 +50,10 @@ android {
         kotlinCompilerExtensionVersion = "1.5.14"
     }
 
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -101,5 +105,6 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.6.0")
 
     // ZIP handling
-    implementation("org.apache.commons:commons-compress:1.26.2")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlin:kotlin-test")
 }
