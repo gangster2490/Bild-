@@ -82,7 +82,7 @@ fun HomeScreen(
             ) { Text("Новый ремонт") }
 
             Button(onClick = onTemplate, modifier = Modifier.fillMaxWidth()) {
-                Text("Добавить RIN-шаблон")
+                Text(if (template == null) "Загрузить RIN-шаблон" else "Заменить шаблон")
             }
             OutlinedButton(onClick = onProjects, modifier = Modifier.fillMaxWidth()) {
                 Text("Мои проекты")

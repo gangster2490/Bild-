@@ -58,7 +58,7 @@ fun TemplateScreen(repository: RinRepository, onBack: () -> Unit) {
             error = null
             message = null
             try {
-                val name = UriIO.displayName(context, uri, "rin_template.pptx")
+                val name = UriIO.displayName(context, uri, "")
                 val info = repository.importTemplate(uri, name)
                 message = "Шаблон сохранён: ${info.fileName} (${info.sizeBytes / 1024} КБ)"
             } catch (e: Exception) {
@@ -69,18 +69,21 @@ fun TemplateScreen(repository: RinRepository, onBack: () -> Unit) {
         }
     }
 
-    // OpenDocument (SAF) — preferred; broad MIME so OEM pickers show PPTX saved as ZIP
     val openDocument = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) importUri(uri)
     }
 
-    // GetContent fallback — some devices fail OpenDocument with multi-MIME filters
-    val getContent = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        if (uri != null) importUri(uri)
+    fun pickTemplate() {
+        openDocument.launch(
+            arrayOf(
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "application/vnd.ms-powerpoint",
+                "application/octet-stream",
+                "*/*"
+            )
+        )
     }
 
     Scaffold(
@@ -104,64 +107,31 @@ fun TemplateScreen(repository: RinRepository, onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                "Загрузите RIN-шаблон PowerPoint через файловый менеджер. Шаблон не встроен в APK.",
+                "Загрузите RIN Template.pptx через ACTION_OPEN_DOCUMENT. " +
+                    "Принимаются .pptx, .ppt и файлы с MIME application/octet-stream. " +
+                    "Настоящий PowerPoint определяется по ppt/presentation.xml.",
                 style = MaterialTheme.typography.bodyLarge
             )
-            Text(
-                "Основной формат — .pptx. Если система показывает файл как ZIP — это нормально: " +
-                    "приложение определяет PPTX по содержимому, а не только по расширению.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text("Также допускаются ZIP, JSON и PDF.")
 
             if (template == null) {
                 Text(
-                    "Сначала добавьте RIN-шаблон PowerPoint.",
+                    "Сначала загрузите RIN-шаблон PowerPoint.",
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.titleLarge
                 )
+                Button(
+                    onClick = { pickTemplate() },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !loading
+                ) { Text("Загрузить RIN-шаблон") }
             } else {
-                Text("Файл: ${template!!.fileName}", style = MaterialTheme.typography.titleLarge)
+                Text("Имя шаблона: ${template!!.fileName}", style = MaterialTheme.typography.titleLarge)
                 Text("Размер: ${template!!.sizeBytes / 1024} КБ")
-                val stored = repository.templateFile()
-                if (stored != null) {
-                    Text(
-                        "Сохранено как: ${stored.name}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            Button(
-                onClick = {
-                    openDocument.launch(
-                        arrayOf(
-                            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                            "application/vnd.ms-powerpoint",
-                            "application/zip",
-                            "application/x-zip-compressed",
-                            "application/octet-stream",
-                            "application/pdf",
-                            "application/json",
-                            "*/*"
-                        )
-                    )
-                },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !loading
-            ) {
-                Text(if (template == null) "Добавить RIN-шаблон" else "Заменить шаблон")
-            }
-
-            OutlinedButton(
-                onClick = { getContent.launch("*/*") },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !loading
-            ) { Text("Выбрать файл (альтернативно)") }
-
-            if (template != null) {
+                Button(
+                    onClick = { pickTemplate() },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !loading
+                ) { Text("Заменить шаблон") }
                 OutlinedButton(
                     onClick = { confirmDelete = true },
                     modifier = Modifier.fillMaxWidth(),
@@ -171,7 +141,7 @@ fun TemplateScreen(repository: RinRepository, onBack: () -> Unit) {
 
             if (loading) {
                 CircularProgressIndicator()
-                Text("Копирование и проверка файла…")
+                Text("Копирование через ContentResolver и проверка ppt/presentation.xml…")
             }
 
             message?.let { Text(it, color = MaterialTheme.colorScheme.secondary) }
