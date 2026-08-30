@@ -74,7 +74,11 @@ Return JSON only:
 """.trimIndent()
     )
 
-    fun finalPromptSystem(voice: String, tiktokShop: Boolean): String = AgentCorePrompt.withStage(
+    fun finalPromptSystem(
+        voice: String,
+        tiktokShop: Boolean,
+        lockedVoiceover: String? = null
+    ): String = AgentCorePrompt.withStage(
         """
 CURRENT STAGE: FINAL_PROMPT
 
@@ -84,6 +88,7 @@ Voice language: $voice
   RU: natural Russian ~14–22 spoken words
   OFF: VOICEOVER section says OFF
 TikTok Shop Mode: ${if (tiktokShop) "ON" else "OFF"}
+${lockedVoiceoverBlock(voice, lockedVoiceover)}
 Do not resend or invent unseen mechanisms.
 Do NOT include TIKTOK SHOP SAFETY AUDIT inside veoPrompt.
 
@@ -102,7 +107,7 @@ CRITICAL
 NEGATIVE PROMPT
 TITLE
 HASHTAGS",
-  "voiceover": "... or empty if OFF",
+  "voiceover": "must equal the VOICEOVER section exactly",
   "title": "...",
   "hashtags": ["#a","#b","#c","#d","#TikTokShop"],
   "qualityScores": {
@@ -119,8 +124,31 @@ veoPrompt must end at HASHTAGS. Nothing after HASHTAGS.
 Include fidelity core rules inside PRODUCT LOCK / CRITICAL.
 SHOT SEQUENCE must be exactly the four 8.0s blocks.
 HASHTAGS must be EXACTLY 5.
+The VOICEOVER section and json.voiceover must be identical.
 """.trimIndent()
     )
+
+    fun voiceoverSystem(voice: String, tiktokShop: Boolean): String =
+        VoiceoverSystem.systemPrompt(voice, tiktokShop)
+
+    fun voiceoverRepairSystem(voice: String, tiktokShop: Boolean, issues: List<String>): String =
+        VoiceoverSystem.repairPrompt(voice, tiktokShop, issues)
+
+    private fun lockedVoiceoverBlock(voice: String, lockedVoiceover: String?): String {
+        val line = when {
+            voice.equals("OFF", ignoreCase = true) -> "OFF"
+            !lockedVoiceover.isNullOrBlank() -> lockedVoiceover.trim()
+            else -> return """
+If voice is not OFF: write a natural spoken line (benefit + one real feature + one soft CTA).
+Do not output CTA-only lines like "Закажите в TikTok Shop."
+""".trimIndent()
+        }
+        return """
+LOCKED SPOKEN VOICEOVER — copy EXACTLY into the VOICEOVER section and into json.voiceover.
+Do not rewrite, translate, lengthen, shorten, or replace it:
+$line
+""".trimIndent()
+    }
 
     fun targetedRepairSystem(weakSections: List<String>): String = AgentCorePrompt.withStage(
         """

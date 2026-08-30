@@ -48,7 +48,11 @@ object PromptCleanup {
         prompt = removeDuplicateMarketplaceRules(prompt)
         prompt = ensureSectionOrder(prompt, marketplace, issues)
 
-        var vo = cleanupVoiceover(voiceover.ifBlank { extractSection(prompt, "VOICEOVER") }, voiceLanguage)
+        var vo = cleanupVoiceover(
+            voiceover.ifBlank { extractSection(prompt, "VOICEOVER") },
+            voiceLanguage,
+            tiktokShopMode
+        )
         if (voiceLanguage == "OFF") {
             vo = "OFF"
             prompt = replaceSection(prompt, "VOICEOVER", "OFF")
@@ -181,53 +185,8 @@ object PromptCleanup {
             .trim()
     }
 
-    fun cleanupVoiceover(raw: String, language: String): String {
-        if (language == "OFF") return "OFF"
-        var text = raw.trim()
-            .removePrefix("VOICEOVER")
-            .trimStart(':')
-            .trim()
-        if (text.isBlank()) return text
-
-        // Remove duplicate sentences
-        val sentences = text.split(Regex("(?<=[.!?])\\s+"))
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-        val unique = mutableListOf<String>()
-        val seen = mutableSetOf<String>()
-        sentences.forEach { s ->
-            val key = s.lowercase().replace(Regex("[.!?]+$"), "").trim()
-            if (seen.add(key)) unique += s
-        }
-        // Drop short CTA-only sentences when a longer sentence repeats the same CTA verb
-        val ctaVerbs = listOf("закажите", "jetzt bestellen", "купите", "bestellen sie")
-        val filtered = unique.filterIndexed { index, s ->
-            val lower = s.lowercase().replace(Regex("[.!?]+$"), "").trim()
-            val isShortCta = ctaVerbs.any { lower == it || lower.startsWith("$it ") && lower.length < it.length + 8 }
-            if (!isShortCta && lower !in ctaVerbs) return@filterIndexed true
-            // keep short CTA only if no other sentence contains the same verb
-            val verb = ctaVerbs.firstOrNull { lower.startsWith(it) } ?: return@filterIndexed true
-            unique.withIndex().none { (i, other) ->
-                i != index && other.lowercase().contains(verb)
-            }
-        }
-        text = filtered.joinToString(" ")
-
-        // Remove repeated consecutive words
-        text = text.split(Regex("\\s+")).fold(mutableListOf<String>()) { acc, w ->
-            if (acc.isEmpty() || !acc.last().equals(w, ignoreCase = true)) acc += w
-            acc
-        }.joinToString(" ")
-
-        // Soft CTA dedupe leftovers
-        text = text.replace(Regex("(?iu)(закажите[.!]\\s*){2,}"), "Закажите. ")
-        text = text.replace(Regex("(?iu)(jetzt bestellen[.!]\\s*){2,}"), "Jetzt bestellen. ")
-        text = normalizePunctuation(text)
-
-        if (!text.matches(Regex(".*[.!?…]\$"))) {
-            text += "."
-        }
-        return text.trim()
+    fun cleanupVoiceover(raw: String, language: String, tiktokShop: Boolean = true): String {
+        return VoiceoverSystem.finalize(raw, language, tiktokShop).text
     }
 
     private fun normalizeHashtags(tags: List<String>): List<String> {
