@@ -26,16 +26,6 @@ object OpenAiModelCatalog {
             id = "gpt-5.6-luna",
             label = "GPT-5.6 Luna",
             hint = "Быстрее · дешевле"
-        ),
-        OpenAiModelOption(
-            id = "gpt-4.1",
-            label = "GPT-4.1",
-            hint = "Vision · стабильный запасной"
-        ),
-        OpenAiModelOption(
-            id = "gpt-4o",
-            label = "GPT-4o",
-            hint = "Legacy"
         )
     )
 
@@ -49,8 +39,10 @@ object OpenAiModelCatalog {
         "gpt-5-mini" to "gpt-5.6-luna",
         "gpt-5.4-mini" to "gpt-5.6-luna",
         "gpt-5-nano" to "gpt-5.6-luna",
+        "gpt-4o" to DEFAULT,
         "gpt-4o-mini" to DEFAULT,
-        "gpt-4.1-mini" to "gpt-4.1"
+        "gpt-4.1" to DEFAULT,
+        "gpt-4.1-mini" to DEFAULT
     )
 
     fun sanitize(stored: String?): String {

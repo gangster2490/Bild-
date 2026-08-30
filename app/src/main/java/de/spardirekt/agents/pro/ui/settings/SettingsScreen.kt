@@ -290,7 +290,7 @@ fun SettingsScreen(
                 Text("OpenAI Model", style = type.cardTitle.copy(color = VppColors.textLight))
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "GPT-5.6 Sol / Terra / Luna для анализа фото и VEO Prompt. По умолчанию gpt-5.6-sol.",
+                    "Только GPT-5.6: Sol, Terra или Luna. Старые GPT-4 модели больше не выбираются.",
                     style = type.secondary.copy(color = VppColors.textMuted, fontSize = 12.sp)
                 )
                 Spacer(Modifier.height(12.dp))
@@ -367,7 +367,7 @@ fun SettingsScreen(
                 Text("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", style = type.cardTitle.copy(color = VppColors.textLight))
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Private VEO 3.1 prompt generator · 3.2.1",
+                    "Private VEO 3.1 prompt generator · 3.2.2",
                     style = type.secondary.copy(color = VppColors.textMuted)
                 )
             }

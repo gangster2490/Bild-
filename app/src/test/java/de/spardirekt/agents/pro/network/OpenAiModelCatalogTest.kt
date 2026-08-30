@@ -7,23 +7,26 @@ import org.junit.Test
 
 class OpenAiModelCatalogTest {
     @Test
-    fun defaultIsExplicitGpt56Sol() {
-        assertEquals("gpt-5.6-sol", OpenAiModelCatalog.DEFAULT)
-        assertTrue(OpenAiModelCatalog.isGpt5Family(OpenAiModelCatalog.DEFAULT))
-        assertTrue(OpenAiModelCatalog.isGpt56Family(OpenAiModelCatalog.DEFAULT))
+    fun selectorOnlyOffersGpt56Family() {
+        assertEquals(
+            listOf("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"),
+            OpenAiModelCatalog.options.map { it.id }
+        )
+        assertTrue(OpenAiModelCatalog.options.none { it.id.startsWith("gpt-4") })
         assertTrue(OpenAiModelCatalog.options.first().recommended)
+        assertEquals("gpt-5.6-sol", OpenAiModelCatalog.DEFAULT)
     }
 
     @Test
-    fun sanitizesAliasAndLegacyIds() {
+    fun remapsLegacyGpt4IdsToSol() {
         assertEquals("gpt-5.6-sol", OpenAiModelCatalog.sanitize(null))
         assertEquals("gpt-5.6-sol", OpenAiModelCatalog.sanitize("gpt-5.6"))
+        assertEquals("gpt-5.6-sol", OpenAiModelCatalog.sanitize("gpt-4o"))
         assertEquals("gpt-5.6-sol", OpenAiModelCatalog.sanitize("gpt-4o-mini"))
-        assertEquals("gpt-5.6-sol", OpenAiModelCatalog.sanitize("gpt-5.4"))
-        assertEquals("gpt-4o", OpenAiModelCatalog.sanitize("gpt-4o"))
+        assertEquals("gpt-5.6-sol", OpenAiModelCatalog.sanitize("gpt-4.1"))
+        assertEquals("gpt-5.6-sol", OpenAiModelCatalog.sanitize("gpt-4.1-mini"))
         assertEquals("gpt-5.6-terra", OpenAiModelCatalog.sanitize("gpt-5.6-terra"))
         assertEquals("gpt-5.6-luna", OpenAiModelCatalog.sanitize("gpt-5-mini"))
-        assertEquals("gpt-4.1", OpenAiModelCatalog.sanitize("gpt-4.1-mini"))
     }
 
     @Test
