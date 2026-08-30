@@ -5,6 +5,7 @@ import com.rin.repairagent.data.model.ProjectPhoto
 import com.rin.repairagent.data.model.RepairProject
 import com.rin.repairagent.data.model.ResultLanguage
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -72,10 +73,16 @@ class PptxRinWriterTest {
             val sldCount = Regex("""<p:sldId\b""").findAll(pres).count()
             // cover + 3 content slides
             assertEquals(4, sldCount)
+            val slide1 = zip.getInputStream(zip.getEntry("ppt/slides/slide1.xml")).bufferedReader().readText()
+            assertTrue(slide1.contains("Тестовый ремонт"))
+            assertTrue(slide1.contains("eGAZELLE"))
             val slide2 = zip.getInputStream(zip.getEntry("ppt/slides/slide2.xml")).bufferedReader().readText()
             assertTrue(slide2.contains("a:off x=\"400000\" y=\"800000\""))
             assertTrue(slide2.contains("a:ext cx=\"5000000\" cy=\"4000000\""))
             assertTrue(slide2.contains("Сделайте шаг 1") || slide2.contains("Шаг 1"))
+            assertTrue(slide2.contains("Инструменты: ключ 9 мм"))
+            assertFalse(slide2.contains("Фото 1:"))
+            assertTrue(slide2.contains("•") || slide2.contains("Сделайте шаг 1"))
         }
     }
 
@@ -147,8 +154,15 @@ class PptxRinWriterTest {
             assertTrue(slide2.contains("y=\"800000\"") && slide2.contains("x=\"400000\""))
             assertTrue(slide2.contains("cx=\"5000000\"") && slide2.contains("cy=\"4000000\""))
             assertTrue(slide2.contains("Сделайте шаг 1") || slide2.contains("Шаг 1"))
+            assertTrue(slide2.contains("Инструменты: ключ 9 мм"))
+            assertTrue(slide2.contains("Важно: не применяйте силу"))
+            assertFalse(slide2.contains("Фото 1:"))
             assertTrue(slide2.contains("xml:space=\"preserve\"") || slide2.contains("Сделайте шаг 1"))
             val slide1 = zip.getInputStream(zip.getEntry("ppt/slides/slide1.xml")).bufferedReader().readText()
+            assertTrue(slide1.contains("Офисный ремонт"))
+            assertTrue(slide1.contains("eGAZELLE"))
+            assertTrue(slide1.contains("Продукт: eGazelle"))
+            assertFalse(slide1.contains("Продукт: SAMPLE"))
             assertTrue(slide1.contains("cx=\"800000\"") && slide1.contains("cy=\"500000\""))
             val slide3Rels = zip.getInputStream(zip.getEntry("ppt/slides/_rels/slide3.xml.rels"))
                 .bufferedReader().readText()
@@ -368,6 +382,7 @@ class PptxRinWriterTest {
     <p:grpSpPr><a:xfrm><a:off y="0" x="0"/><a:ext cy="6858000" cx="12192000"/><a:chOff x="0" y="0"/><a:chExt cx="12192000" cy="6858000"/></a:xfrm></p:grpSpPr>
     ${textBoxPreserve(2, 400000, 400000, 8000000, 800000, 2800, "eGAZELLE")}
     ${textBoxPreserve(3, 400000, 1400000, 9000000, 1000000, 2000, "RIN Template")}
+    ${textBoxPreserve(4, 400000, 2600000, 10000000, 400000, 1100, "Автор: Сервисная мастерская Дата: 01.01.2020 Продукт: SAMPLE")}
     <p:pic name="Logo">
       <p:nvPicPr><p:cNvPr id="9" name="Logo"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>
       <p:blipFill><a:blip r:embed="rIdLogo"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>
