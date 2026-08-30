@@ -2,6 +2,7 @@ package de.spardirekt.agents.pro.ui.create
 
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -53,6 +55,7 @@ import de.spardirekt.agents.pro.model.AppMode
 import de.spardirekt.agents.pro.model.CreativeMode
 import de.spardirekt.agents.pro.model.GenerationStage
 import de.spardirekt.agents.pro.model.ImageCategory
+import de.spardirekt.agents.pro.model.ProjectImage
 import de.spardirekt.agents.pro.model.ProjectStatus
 import de.spardirekt.agents.pro.model.VoiceLanguage
 import de.spardirekt.agents.pro.ui.components.AppHeader
@@ -87,7 +90,7 @@ fun CreateScreen(
     }
 
     val picker = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetMultipleContents()
+        ActivityResultContracts.PickMultipleVisualMedia(15)
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) viewModel.addImages(uris)
     }
@@ -108,6 +111,7 @@ fun CreateScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .statusBarsPadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = VppDimens.screenPadding)
                 .padding(top = 12.dp, bottom = 110.dp)
@@ -139,74 +143,24 @@ fun CreateScreen(
                 )
                 Spacer(Modifier.height(14.dp))
                 if (state.images.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        state.images.forEachIndexed { index, img ->
-                            Box(
-                                modifier = Modifier
-                                    .width(84.dp)
-                                    .aspectRatio(1f)
+                    val rows = state.images.chunked(3)
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        rows.forEach { row ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                AsyncImage(
-                                    model = Uri.parse(img.uri),
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clip(VppShapes.thumbShape)
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .padding(6.dp)
-                                        .size(20.dp)
-                                        .clip(CircleShape)
-                                        .background(VppColors.cardInset.copy(alpha = 0.85f))
-                                        .align(Alignment.TopStart),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        "${index + 1}",
-                                        color = VppColors.textLight,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
+                                row.forEachIndexed { _, img ->
+                                    val index = state.images.indexOf(img)
+                                    PhotoThumb(
+                                        img = img,
+                                        index = index,
+                                        onRemove = { viewModel.removeImage(img.id) },
+                                        modifier = Modifier.weight(1f)
                                     )
                                 }
-                                Box(
-                                    modifier = Modifier
-                                        .padding(4.dp)
-                                        .size(22.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.Black.copy(alpha = 0.55f))
-                                        .align(Alignment.TopEnd)
-                                        .clickable { viewModel.removeImage(img.id) },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        Icons.Filled.Close,
-                                        null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                }
-                                if (img.category != ImageCategory.UNKNOWN) {
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.BottomStart)
-                                            .padding(5.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(VppColors.accentPurple.copy(alpha = 0.9f))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(
-                                            img.category.badgeLabel(),
-                                            style = type.badge.copy(color = Color.White, fontSize = 9.sp),
-                                            maxLines = 1
-                                        )
-                                    }
+                                repeat(3 - row.size) {
+                                    Spacer(Modifier.weight(1f))
                                 }
                             }
                         }
@@ -222,7 +176,11 @@ fun CreateScreen(
                     modifier = Modifier
                         .clip(RoundedCornerShape(14.dp))
                         .background(VppColors.cardInset)
-                        .clickable { picker.launch("image/*") }
+                        .clickable {
+                            picker.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        }
                         .padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -294,7 +252,7 @@ fun CreateScreen(
                     selected = state.mode.name,
                     onSelect = { viewModel.setMode(AppMode.valueOf(it)) }
                 )
-                if (state.mode == AppMode.Advanced || true) {
+                if (state.mode == AppMode.Advanced) {
                     Spacer(Modifier.height(16.dp))
                     Text("Креатив", style = type.secondary.copy(color = VppColors.textMuted))
                     Spacer(Modifier.height(10.dp))
@@ -548,6 +506,75 @@ private fun ApiKeyDialog(
                 ) {
                     Text("Отмена", color = VppColors.textLight)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhotoThumb(
+    img: ProjectImage,
+    index: Int,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val type = LocalVppType.current
+    Box(modifier = modifier.aspectRatio(1f)) {
+        AsyncImage(
+            model = img.localPath?.takeIf { it.isNotBlank() } ?: img.uri,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(VppShapes.thumbShape)
+        )
+        Box(
+            modifier = Modifier
+                .padding(6.dp)
+                .size(20.dp)
+                .clip(CircleShape)
+                .background(VppColors.cardInset.copy(alpha = 0.85f))
+                .align(Alignment.TopStart),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                "${index + 1}",
+                color = VppColors.textLight,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Box(
+            modifier = Modifier
+                .padding(4.dp)
+                .size(22.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.55f))
+                .align(Alignment.TopEnd)
+                .clickable(onClick = onRemove),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Filled.Close,
+                null,
+                tint = Color.White,
+                modifier = Modifier.size(14.dp)
+            )
+        }
+        if (img.category != ImageCategory.UNKNOWN) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(5.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(VppColors.accentPurple.copy(alpha = 0.9f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    img.category.badgeLabel(),
+                    style = type.badge.copy(color = Color.White, fontSize = 9.sp),
+                    maxLines = 1
+                )
             }
         }
     }

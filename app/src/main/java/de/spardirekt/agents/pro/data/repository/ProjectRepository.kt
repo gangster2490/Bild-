@@ -10,6 +10,7 @@ import de.spardirekt.agents.pro.model.ProjectImage
 import de.spardirekt.agents.pro.model.ProjectStatus
 import de.spardirekt.agents.pro.model.VoiceLanguage
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
@@ -19,10 +20,22 @@ class ProjectRepository(
     private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 ) {
     fun observeAll(): Flow<List<ProjectEntity>> = dao.observeAll()
+
+    fun observeHistory(): Flow<List<ProjectEntity>> = dao.observeAll().map { list ->
+        list.filter { entity ->
+            entity.status != ProjectStatus.Draft.name || parseImages(entity).isNotEmpty()
+        }
+    }
+
     fun observe(id: String): Flow<ProjectEntity?> = dao.observeById(id)
     suspend fun get(id: String): ProjectEntity? = dao.getById(id)
     suspend fun delete(id: String) = dao.delete(id)
     suspend fun clearAll() = dao.clearAll()
+    suspend fun getActiveGenerating(): ProjectEntity? = dao.getActiveGenerating()
+
+    suspend fun findReusableEmptyDraft(): ProjectEntity? {
+        return dao.getRecentDrafts().firstOrNull { parseImages(it).isEmpty() && it.veoPrompt.isBlank() }
+    }
 
     suspend fun createDraft(
         voice: VoiceLanguage,

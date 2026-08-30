@@ -37,6 +37,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.compose.runtime.LaunchedEffect
 import de.spardirekt.agents.pro.ui.create.CreateScreen
 import de.spardirekt.agents.pro.ui.create.CreateViewModel
 import de.spardirekt.agents.pro.ui.history.HistoryScreen
@@ -48,10 +49,11 @@ import de.spardirekt.agents.pro.ui.settings.SettingsViewModel
 import de.spardirekt.agents.pro.ui.theme.VppColors
 
 object Routes {
-    const val CREATE = "create"
+    const val CREATE = "create?projectId={projectId}"
     const val HISTORY = "history"
     const val SETTINGS = "settings"
     const val RESULT = "result/{projectId}"
+    fun create(projectId: String = "") = "create?projectId=$projectId"
     fun result(id: String) = "result/$id"
 }
 
@@ -60,7 +62,9 @@ fun VeoPromptProNav() {
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
-    val showBottomBar = route == Routes.CREATE || route == Routes.HISTORY || route == Routes.SETTINGS
+    val showBottomBar = route?.startsWith("create") == true ||
+        route == Routes.HISTORY ||
+        route == Routes.SETTINGS
 
     Box(modifier = Modifier.fillMaxSize()) {
         NavHost(
@@ -68,8 +72,20 @@ fun VeoPromptProNav() {
             startDestination = Routes.CREATE,
             modifier = Modifier.fillMaxSize()
         ) {
-            composable(Routes.CREATE) {
+            composable(
+                route = Routes.CREATE,
+                arguments = listOf(
+                    navArgument("projectId") {
+                        type = NavType.StringType
+                        defaultValue = ""
+                    }
+                )
+            ) { entry ->
                 val vm: CreateViewModel = viewModel()
+                val requestedId = entry.arguments?.getString("projectId").orEmpty()
+                LaunchedEffect(requestedId) {
+                    if (requestedId.isNotBlank()) vm.openProject(requestedId)
+                }
                 CreateScreen(
                     viewModel = vm,
                     onOpenHistory = {
@@ -94,8 +110,15 @@ fun VeoPromptProNav() {
                 HistoryScreen(
                     viewModel = vm,
                     onOpenResult = { id -> navController.navigate(Routes.result(id)) },
+                    onContinueProject = { id ->
+                        navController.navigate(Routes.create(id)) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                     onOpenCreate = {
-                        navController.navigate(Routes.CREATE) {
+                        navController.navigate(Routes.create()) {
                             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                             launchSingleTop = true
                             restoreState = true
@@ -115,7 +138,7 @@ fun VeoPromptProNav() {
                 SettingsScreen(
                     viewModel = vm,
                     onOpenCreate = {
-                        navController.navigate(Routes.CREATE) {
+                        navController.navigate(Routes.create()) {
                             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                             launchSingleTop = true
                             restoreState = true
@@ -140,8 +163,8 @@ fun VeoPromptProNav() {
                     projectId = id,
                     viewModel = vm,
                     onBackToCreate = {
-                        navController.navigate(Routes.CREATE) {
-                            popUpTo(Routes.CREATE) { inclusive = false }
+                        navController.navigate(Routes.create()) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                             launchSingleTop = true
                         }
                     },
@@ -182,8 +205,8 @@ private fun BottomBar(
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        BottomItem("Создать", Icons.Outlined.AddCircleOutline, currentRoute == Routes.CREATE) {
-            onSelect(Routes.CREATE)
+        BottomItem("Создать", Icons.Outlined.AddCircleOutline, currentRoute?.startsWith("create") == true) {
+            onSelect(Routes.create())
         }
         BottomItem("История", Icons.Outlined.History, currentRoute == Routes.HISTORY) {
             onSelect(Routes.HISTORY)

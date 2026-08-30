@@ -31,7 +31,8 @@ object PromptCleanup {
         title: String,
         hashtags: List<String>,
         voiceLanguage: String,
-        marketplace: Boolean
+        marketplace: Boolean,
+        tiktokShopMode: Boolean = true
     ): CleanupResult {
         val issues = mutableListOf<String>()
         var prompt = rawPrompt.trim()
@@ -69,10 +70,8 @@ object PromptCleanup {
         prompt = replaceSection(prompt, "TITLE", cleanTitle)
 
         var tags = normalizeHashtags(hashtags.ifEmpty { extractHashtags(prompt) })
-        if (tags.size != 5) {
-            tags = padHashtags(tags, cleanTitle)
-            issues += "hashtags_normalized_to_5"
-        }
+        tags = ensureFiveHashtags(tags, cleanTitle, tiktokShopMode)
+        if (tags.size != 5) issues += "hashtags_normalized_to_5"
         prompt = replaceSection(prompt, "HASHTAGS", tags.joinToString(" "))
 
         // Ensure shot sequence mentions exact blocks
@@ -243,29 +242,6 @@ object PromptCleanup {
         return Regex("#[\\p{L}\\p{N}_]+").findAll(section).map { it.value }.toList()
     }
 
-    private fun padHashtags(tags: List<String>, title: String): List<String> {
-        val base = tags.toMutableList()
-        val fallbacks = listOf(
-            "#TikTokShop",
-            "#ProductAd",
-            "#MustSee",
-            "#HomeFinds",
-            "#ShopNow",
-            "#ViralProduct",
-            "#SmartBuy"
-        )
-        val fromTitle = title.split(Regex("\\s+"))
-            .map { it.replace(Regex("[^\\p{L}\\p{N}]"), "") }
-            .filter { it.length >= 3 }
-            .map { "#$it" }
-        (fromTitle + fallbacks).forEach { tag ->
-            if (base.size >= 5) return@forEach
-            if (base.none { it.equals(tag, true) }) base += tag
-        }
-        while (base.size < 5) base += "#TikTokShop${base.size}"
-        return base.take(5)
-    }
-
     fun extractSection(prompt: String, section: String): String {
         val regex = Regex("(?im)^$section\\b\\s*:?\\s*", RegexOption.MULTILINE)
         val match = regex.find(prompt) ?: return ""
@@ -311,13 +287,8 @@ object PromptCleanup {
             """.trimIndent()
             issues += "format_injected"
         }
-        if (map["SHOT SEQUENCE"].isNullOrBlank()) {
-            map["SHOT SEQUENCE"] = """
-                0.0–2.0s — HOOK: product visible immediately with strongest verified detail.
-                2.0–4.0s — IDENTITY: clear full/product-true framing.
-                4.0–6.0s — FEATURE / DEMO: one hero feature only, physically plausible.
-                6.0–8.0s — HERO / CTA: desirable hero hold and soft CTA.
-            """.trimIndent()
+        if (map["SHOT SEQUENCE"].isNullOrBlank() || !hasFourBlocks(map["SHOT SEQUENCE"].orEmpty())) {
+            map["SHOT SEQUENCE"] = CANONICAL_SHOT_SEQUENCE
             issues += "shot_sequence_injected"
         }
         if (map["PRODUCT LOCK"].isNullOrBlank()) {
@@ -374,4 +345,54 @@ object PromptCleanup {
             "$name\n${map[name].orEmpty().trim()}"
         }.trim() + "\n"
     }
+
+    private fun hasFourBlocks(sequence: String): Boolean {
+        return listOf("0.0", "2.0", "4.0", "6.0", "8.0").all { sequence.contains(it) } &&
+            !Regex("(?i)(9 scenes|25[-–]35|long-form)").containsMatchIn(sequence)
+    }
+
+    private fun padHashtags(tags: List<String>, title: String): List<String> {
+        val base = tags.toMutableList()
+        val fallbacks = listOf(
+            "#TikTokShop",
+            "#ProductAd",
+            "#MustSee",
+            "#HomeFinds",
+            "#ShopNow",
+            "#ViralProduct",
+            "#SmartBuy"
+        )
+        val fromTitle = title.split(Regex("\\s+"))
+            .map { it.replace(Regex("[^\\p{L}\\p{N}]"), "") }
+            .filter { it.length >= 3 }
+            .map { "#$it" }
+        (fromTitle + fallbacks).forEach { tag ->
+            if (base.size >= 5) return@forEach
+            if (base.none { it.equals(tag, true) }) base += tag
+        }
+        while (base.size < 5) base += "#TikTokShop${base.size}"
+        return base.take(5)
+    }
+
+    private fun ensureFiveHashtags(
+        tags: List<String>,
+        title: String,
+        tiktokShopMode: Boolean
+    ): List<String> {
+        val padded = if (tags.size == 5) tags else padHashtags(tags, title)
+        val result = padded.take(5).toMutableList()
+        if (tiktokShopMode && result.none { it.equals("#TikTokShop", ignoreCase = true) }) {
+            if (result.size >= 5) result[result.lastIndex] = "#TikTokShop"
+            else result += "#TikTokShop"
+        }
+        return result.take(5)
+    }
+
+    private val CANONICAL_SHOT_SEQUENCE = """
+        0.0–2.0s — HOOK: product visible immediately with strongest verified detail.
+        2.0–4.0s — IDENTITY: clear full/product-true framing.
+        4.0–6.0s — FEATURE / DEMO: one hero feature only, physically plausible.
+        6.0–8.0s — HERO / CTA: desirable hero hold and soft CTA.
+        Timeline ends at 8.0s. Four blocks only. No extra scenes.
+    """.trimIndent()
 }

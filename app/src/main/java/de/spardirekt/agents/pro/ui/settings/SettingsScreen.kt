@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -133,7 +134,10 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     fun setModel(model: String) = viewModelScope.launch { settingsStore.setModel(model) }
     fun setDebug(on: Boolean) = viewModelScope.launch { settingsStore.setDebugLogs(on) }
     fun setOutputLanguage(lang: String) = viewModelScope.launch { settingsStore.setOutputLanguage(lang) }
-    fun clearHistory() = viewModelScope.launch { repo.clearAll() }
+    fun clearHistory() = viewModelScope.launch {
+        de.spardirekt.agents.pro.storage.ImageStore.deleteAll(getApplication())
+        repo.clearAll()
+    }
 }
 
 @Composable
@@ -161,6 +165,7 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
+                .statusBarsPadding()
                 .padding(horizontal = VppDimens.screenPadding)
                 .padding(top = 12.dp, bottom = 110.dp)
         ) {
@@ -189,7 +194,7 @@ fun SettingsScreen(
                 }
                 Spacer(Modifier.height(14.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsAction("Заменить") { viewModel.openReplace() }
+                    SettingsAction(if (ui.hasKey) "Заменить" else "Добавить") { viewModel.openReplace() }
                     SettingsAction("Проверить") { viewModel.testConnection() }
                 }
                 Spacer(Modifier.height(10.dp))
@@ -312,7 +317,7 @@ fun SettingsScreen(
                 Text("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", style = type.cardTitle.copy(color = VppColors.textLight))
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Private VEO 3.1 prompt generator",
+                    "Private VEO 3.1 prompt generator · 3.0",
                     style = type.secondary.copy(color = VppColors.textMuted)
                 )
             }

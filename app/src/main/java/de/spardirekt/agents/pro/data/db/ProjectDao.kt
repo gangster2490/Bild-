@@ -32,4 +32,7 @@ interface ProjectDao {
 
     @Query("SELECT * FROM projects WHERE status = 'Generating' ORDER BY updatedAt DESC LIMIT 1")
     suspend fun getActiveGenerating(): ProjectEntity?
+
+    @Query("SELECT * FROM projects WHERE status = 'Draft' ORDER BY updatedAt DESC LIMIT 12")
+    suspend fun getRecentDrafts(): List<ProjectEntity>
 }

@@ -21,7 +21,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -69,7 +68,7 @@ class GenerationPipeline(
     ): Result<GenerationBundle> {
         return try {
             val dataUrls = input.images.mapNotNull { img ->
-                ImageEncoder.toDataUrl(context, img.uri)
+                ImageEncoder.toDataUrl(context, img.uri, img.localPath)
             }
             if (dataUrls.isEmpty()) {
                 return Result.failure(AppError.Unknown("Нет доступных изображений для анализа."))
@@ -216,7 +215,8 @@ class GenerationPipeline(
                 title = bundle.title,
                 hashtags = bundle.hashtags,
                 voiceLanguage = input.voiceLanguage.name,
-                marketplace = marketplace
+                marketplace = marketplace,
+                tiktokShopMode = input.tiktokShopMode
             )
             val completeness = PromptCleanup.validateCompleteness(cleaned.veoPrompt, cleaned.hashtags)
             if (completeness.any { it.startsWith("missing_") }) {
@@ -296,22 +296,25 @@ Remember: do not resend or rely on inventing unseen mechanisms.
     }
 
     private fun decodeAnalysis(raw: String): AnalysisResult {
+        val payload = JsonExtractor.extract(raw)
         return runCatching {
-            json.decodeFromString(AnalysisResult.serializer(), raw)
+            json.decodeFromString(AnalysisResult.serializer(), payload)
         }.getOrElse {
             AnalysisResult(summary = raw.take(500))
         }
     }
 
     private fun decodeProductModel(raw: String): ProductModel {
+        val payload = JsonExtractor.extract(raw)
         return runCatching {
-            json.decodeFromString(ProductModel.serializer(), raw)
+            json.decodeFromString(ProductModel.serializer(), payload)
         }.getOrElse { ProductModel(productIdentity = "unknown") }
     }
 
     private fun decodeCreativePlan(raw: String): CreativePlan {
+        val payload = JsonExtractor.extract(raw)
         return runCatching {
-            json.decodeFromString(CreativePlan.serializer(), raw)
+            json.decodeFromString(CreativePlan.serializer(), payload)
         }.getOrElse { CreativePlan() }
     }
 
@@ -321,8 +324,9 @@ Remember: do not resend or rely on inventing unseen mechanisms.
         productModelJson: String,
         creativePlanJson: String
     ): GenerationBundle {
+        val payload = JsonExtractor.extract(raw)
         return runCatching {
-            val obj = json.parseToJsonElement(raw).jsonObject
+            val obj = json.parseToJsonElement(payload).jsonObject
             val hashtags = obj["hashtags"]?.jsonArray?.mapNotNull {
                 it.jsonPrimitive.contentOrNull
             }.orEmpty()

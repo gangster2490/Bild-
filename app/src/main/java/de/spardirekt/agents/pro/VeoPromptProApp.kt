@@ -36,6 +36,7 @@ class VeoPromptProApp : Application() {
             settingsStore = settingsStore,
             openAi = openAiClient
         )
+        generationManager.resumeInterruptedIfNeeded()
     }
 
     companion object {

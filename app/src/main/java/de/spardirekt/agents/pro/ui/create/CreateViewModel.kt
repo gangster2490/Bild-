@@ -12,6 +12,8 @@ import de.spardirekt.agents.pro.model.GenerationStage
 import de.spardirekt.agents.pro.model.ProjectImage
 import de.spardirekt.agents.pro.model.ProjectStatus
 import de.spardirekt.agents.pro.model.VoiceLanguage
+import de.spardirekt.agents.pro.storage.ImageStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 data class CreateUiState(
@@ -83,12 +86,30 @@ class CreateViewModel(app: Application) : AndroidViewModel(app) {
         if (projectId != null) return
         viewModelScope.launch {
             val sett = settingsStore.settings.first()
+            val generating = repo.getActiveGenerating()
+            if (generating != null) {
+                attachProject(generating.id)
+                return@launch
+            }
+            if (sett.lastProjectId.isNotBlank()) {
+                val last = repo.get(sett.lastProjectId)
+                if (last != null && last.status != ProjectStatus.Ready.name) {
+                    attachProject(last.id)
+                    return@launch
+                }
+            }
+            val reusable = repo.findReusableEmptyDraft()
+            if (reusable != null) {
+                attachProject(reusable.id)
+                return@launch
+            }
             val draft = repo.createDraft(
                 voice = sett.defaultVoice,
                 mode = sett.defaultMode,
                 creative = sett.defaultCreative,
                 tiktok = sett.tiktokShopMode
             )
+            settingsStore.setLastProjectId(draft.id)
             attachProject(draft.id)
             _state.update {
                 it.copy(
@@ -103,11 +124,14 @@ class CreateViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun openProject(id: String) {
+        if (id.isBlank()) return
+        viewModelScope.launch { settingsStore.setLastProjectId(id) }
         attachProject(id)
     }
 
     private fun attachProject(id: String) {
         projectId = id
+        viewModelScope.launch { settingsStore.setLastProjectId(id) }
         observeJob?.cancel()
         observeJob = viewModelScope.launch {
             repo.observe(id).collect { entity ->
@@ -161,6 +185,7 @@ class CreateViewModel(app: Application) : AndroidViewModel(app) {
                 tiktokShopMode = sett.tiktokShopMode
             )
             attachProject(draft.id)
+            settingsStore.setLastProjectId(draft.id)
         }
     }
 
@@ -168,13 +193,18 @@ class CreateViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val p = _state.value.project ?: return@launch
             val current = repo.parseImages(p).toMutableList()
-            uris.forEach { uri ->
-                if (current.size >= 15) return@forEach
-                current += ProjectImage(
-                    id = UUID.randomUUID().toString(),
-                    uri = uri.toString(),
-                    orderIndex = current.size
-                )
+            val app = getApplication<Application>()
+            withContext(Dispatchers.IO) {
+                uris.forEach { uri ->
+                    if (current.size >= 15) return@forEach
+                    val id = UUID.randomUUID().toString()
+                    val stored = runCatching {
+                        ImageStore.persist(app, p.id, id, uri)
+                    }.getOrElse {
+                        ProjectImage(id = id, uri = uri.toString(), orderIndex = current.size)
+                    }
+                    current += stored.copy(orderIndex = current.size)
+                }
             }
             repo.save(
                 p.copy(
@@ -182,12 +212,14 @@ class CreateViewModel(app: Application) : AndroidViewModel(app) {
                     thumbnailUri = current.firstOrNull()?.uri.orEmpty()
                 )
             )
+            settingsStore.setLastProjectId(p.id)
         }
     }
 
     fun removeImage(id: String) {
         viewModelScope.launch {
             val p = _state.value.project ?: return@launch
+            ImageStore.deleteImage(getApplication(), p.id, id)
             val current = repo.parseImages(p)
                 .filterNot { it.id == id }
                 .mapIndexed { i, img -> img.copy(orderIndex = i) }

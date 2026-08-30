@@ -77,6 +77,13 @@ class GenerationManager(
         }
     }
 
+    fun resumeInterruptedIfNeeded() {
+        scope.launch {
+            val active = repository.getActiveGenerating() ?: return@launch
+            if (!_isRunning.value) start(active.id, resume = true)
+        }
+    }
+
     private suspend fun runPipeline(projectId: String, resume: Boolean) {
         val project = repository.get(projectId) ?: return
         val apiKey = apiKeyStore.getKey()
@@ -119,6 +126,11 @@ class GenerationManager(
 
         val result = pipeline.run(input) { update ->
             _stage.value = update.stage
+            GenerationForegroundService.start(
+                appContext,
+                projectId,
+                stageLabel(update.stage)
+            )
             persistStage(projectId, update)
         }
 
@@ -296,5 +308,16 @@ class GenerationManager(
             )
         )
         _stage.value = GenerationStage.FAILED
+    }
+
+    private fun stageLabel(stage: GenerationStage): String = when (stage) {
+        GenerationStage.PHOTO_ANALYSIS -> "Анализ фотографий"
+        GenerationStage.PRODUCT_MODEL -> "Понимание товара"
+        GenerationStage.CREATIVE_DIRECTOR -> "Создание рекламной идеи"
+        GenerationStage.FINAL_PROMPT -> "Создание VEO Prompt"
+        GenerationStage.FINAL_VALIDATION -> "Проверка результата"
+        GenerationStage.FINALIZATION -> "Финализация"
+        GenerationStage.DONE -> "Готово"
+        else -> "Генерация VEO Prompt…"
     }
 }

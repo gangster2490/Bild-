@@ -23,6 +23,7 @@ class SettingsStore(private val context: Context) {
         val historyFormat = stringPreferencesKey("history_format")
         val model = stringPreferencesKey("openai_model")
         val debugLogs = booleanPreferencesKey("debug_logs")
+        val lastProjectId = stringPreferencesKey("last_project_id")
         val outputLanguage = stringPreferencesKey("output_language")
     }
 
@@ -34,7 +35,8 @@ class SettingsStore(private val context: Context) {
         val historyFormat: String = "full",
         val model: String = "gpt-4o",
         val debugLogs: Boolean = false,
-        val outputLanguage: String = "RU"
+        val outputLanguage: String = "RU",
+        val lastProjectId: String = ""
     )
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p ->
@@ -52,7 +54,8 @@ class SettingsStore(private val context: Context) {
             historyFormat = p[Keys.historyFormat] ?: "full",
             model = p[Keys.model] ?: "gpt-4o",
             debugLogs = p[Keys.debugLogs] ?: false,
-            outputLanguage = p[Keys.outputLanguage] ?: "RU"
+            outputLanguage = p[Keys.outputLanguage] ?: "RU",
+            lastProjectId = p[Keys.lastProjectId].orEmpty()
         )
     }
 
@@ -86,5 +89,9 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setOutputLanguage(lang: String) {
         context.settingsDataStore.edit { it[Keys.outputLanguage] = lang }
+    }
+
+    suspend fun setLastProjectId(id: String) {
+        context.settingsDataStore.edit { it[Keys.lastProjectId] = id }
     }
 }

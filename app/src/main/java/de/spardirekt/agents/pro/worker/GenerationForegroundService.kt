@@ -16,9 +16,10 @@ class GenerationForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createChannel()
+        val stage = intent?.getStringExtra(EXTRA_STAGE) ?: "Генерация VEO Prompt…"
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Veo Prompt Pro")
-            .setContentText("Генерация VEO Prompt…")
+            .setContentText(stage)
             .setSmallIcon(android.R.drawable.ic_popup_sync)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -42,11 +43,12 @@ class GenerationForegroundService : Service() {
     companion object {
         private const val CHANNEL_ID = "veo_generation"
         private const val NOTIFICATION_ID = 42
-        private const val ACTION_STOP = "de.spardirekt.agents.pro.STOP_GENERATION"
+        private const val EXTRA_STAGE = "stage"
 
-        fun start(context: Context, projectId: String) {
+        fun start(context: Context, projectId: String, stage: String = "Генерация VEO Prompt…") {
             val intent = Intent(context, GenerationForegroundService::class.java)
                 .putExtra("projectId", projectId)
+                .putExtra(EXTRA_STAGE, stage)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {

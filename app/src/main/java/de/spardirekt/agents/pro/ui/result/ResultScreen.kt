@@ -5,6 +5,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.widget.Toast
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -80,14 +82,9 @@ class ResultViewModel(app: Application) : AndroidViewModel(app) {
             appendLine(entity.veoPrompt.trim())
             appendLine()
             appendLine("---")
-            appendLine("VOICEOVER")
-            appendLine(entity.voiceover.ifBlank { "OFF" })
-            appendLine()
-            appendLine("TITLE")
-            appendLine(entity.title)
-            appendLine()
-            appendLine("HASHTAGS")
-            appendLine(tags)
+            appendLine("Озвучка: ${entity.voiceover.ifBlank { "OFF" }}")
+            appendLine("Название: ${entity.title}")
+            appendLine("Хештеги: $tags")
         }.trim()
     }
 }
@@ -119,6 +116,7 @@ fun ResultScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .statusBarsPadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = VppDimens.screenPadding)
                 .padding(top = 12.dp, bottom = 40.dp)
@@ -334,6 +332,7 @@ private fun SummaryRow(label: String, value: String) {
 private fun copyText(context: Context, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     cm.setPrimaryClip(ClipData.newPlainText("Veo Prompt Pro", text))
+    Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
 }
 
 private fun shareText(context: Context, text: String) {

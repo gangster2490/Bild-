@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -41,6 +42,7 @@ import androidx.lifecycle.viewModelScope
 import coil.compose.AsyncImage
 import de.spardirekt.agents.pro.VeoPromptProApp
 import de.spardirekt.agents.pro.data.db.ProjectEntity
+import de.spardirekt.agents.pro.model.ProjectStatus
 import de.spardirekt.agents.pro.ui.components.AppHeader
 import de.spardirekt.agents.pro.ui.components.GradientHeading
 import de.spardirekt.agents.pro.ui.components.NavyCard
@@ -57,10 +59,13 @@ import java.util.Locale
 
 class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = VeoPromptProApp.instance.projectRepository
-    val projects = repo.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val projects = repo.observeHistory().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun delete(id: String) {
-        viewModelScope.launch { repo.delete(id) }
+        viewModelScope.launch {
+            de.spardirekt.agents.pro.storage.ImageStore.deleteProject(getApplication(), id)
+            repo.delete(id)
+        }
     }
 }
 
@@ -68,6 +73,7 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
 fun HistoryScreen(
     viewModel: HistoryViewModel,
     onOpenResult: (String) -> Unit,
+    onContinueProject: (String) -> Unit,
     onOpenCreate: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
@@ -87,6 +93,7 @@ fun HistoryScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .statusBarsPadding()
                 .padding(horizontal = VppDimens.screenPadding)
                 .padding(top = 12.dp)
         ) {
@@ -120,7 +127,13 @@ fun HistoryScreen(
                         HistoryItem(
                             project = project,
                             dateText = fmt.format(Date(project.updatedAt)),
-                            onClick = { onOpenResult(project.id) },
+                            onClick = {
+                                if (project.status == ProjectStatus.Ready.name && project.veoPrompt.isNotBlank()) {
+                                    onOpenResult(project.id)
+                                } else {
+                                    onContinueProject(project.id)
+                                }
+                            },
                             onDelete = { viewModel.delete(project.id) }
                         )
                     }
