@@ -101,6 +101,33 @@ class VoiceoverSystemTest {
             """{"voiceover":"Der Rahmen bleibt kompakt und leicht."}"""
         )
         assertEquals("Der Rahmen bleibt kompakt und leicht.", extracted)
+        assertEquals(
+            "Der Rahmen bleibt kompakt und leicht.",
+            VoiceoverSystem.extractSpokenLine("""{"spoken":"Der Rahmen bleibt kompakt und leicht."}""")
+        )
+    }
+
+    @Test
+    fun compactEvidenceUsesIdentityNotRawDump() {
+        val evidence = VoiceoverSystem.compactEvidence(
+            """{"productIdentity":"black fishing chair","visualSignature":["red tray","disc feet"]}""",
+            """{"heroFeature":"compact fold","strategy":"Showcase"}"""
+        )
+        assertTrue(evidence.contains("black fishing chair"))
+        assertTrue(evidence.contains("red tray"))
+        assertTrue(evidence.contains("compact fold"))
+        assertFalse(evidence.contains("PRODUCT MODEL:"))
+    }
+
+    @Test
+    fun choosePrefersAcceptableGeneratedLine() {
+        val good = VoiceoverSystem.finalize(
+            "Чёрный каркас с красным столиком складывается за секунды в поездке. Загляни скорее в TikTok Shop.",
+            "RU"
+        )
+        val chosen = VoiceoverSystem.choose(good, "Закажите в TikTok Shop.", "RU")
+        assertEquals(good.text, chosen.text)
+        assertTrue(chosen.acceptable)
     }
 
     @Test

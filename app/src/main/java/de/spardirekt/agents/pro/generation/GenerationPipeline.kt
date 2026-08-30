@@ -150,21 +150,15 @@ class GenerationPipeline(
             }
 
             var finalJson: String
-            var spokenVoiceover = ""
             if (GenerationStage.FINAL_PROMPT in startOrder || input.existingVeoPrompt.isBlank()) {
                 onStage(StageUpdate(GenerationStage.FINAL_PROMPT, analysis, productModel, creativePlan))
-                spokenVoiceover = generateSpokenVoiceover(
-                    input = input,
-                    productModelJson = productModelJson,
-                    creativePlanJson = creativePlanJson
-                )
                 finalJson = openAi.chat(
                     apiKey = input.apiKey,
                     model = input.model,
                     systemPrompt = PromptTemplates.finalPromptSystem(
                         voice = input.voiceLanguage.name,
                         tiktokShop = input.tiktokShopMode,
-                        lockedVoiceover = spokenVoiceover.ifBlank { null }
+                        lockedVoiceover = null
                     ),
                     userText = buildFinalUserPrompt(
                         productModelJson = productModelJson,
@@ -172,8 +166,7 @@ class GenerationPipeline(
                         analysisJson = analysisJson,
                         wish = input.optionalWish,
                         voice = input.voiceLanguage,
-                        tiktok = input.tiktokShopMode,
-                        lockedVoiceover = spokenVoiceover
+                        tiktok = input.tiktokShopMode
                     ),
                     imageDataUrls = emptyList(),
                     timeoutSeconds = 240,
@@ -216,8 +209,22 @@ class GenerationPipeline(
 
             if (input.voiceLanguage == VoiceLanguage.OFF) {
                 bundle = bundle.copy(voiceover = "OFF")
-            } else if (spokenVoiceover.isNotBlank()) {
-                bundle = bundle.copy(voiceover = spokenVoiceover)
+            } else {
+                val generated = generateSpokenVoiceover(
+                    input = input,
+                    productModelJson = productModelJson,
+                    creativePlanJson = creativePlanJson
+                )
+                val fallback = bundle.voiceover.ifBlank {
+                    PromptCleanup.extractSection(bundle.veoPrompt, "VOICEOVER")
+                }
+                val chosen = VoiceoverSystem.choose(
+                    generated = generated,
+                    fallbackRaw = fallback,
+                    language = input.voiceLanguage.name,
+                    tiktokShop = input.tiktokShopMode
+                )
+                bundle = bundle.copy(voiceover = chosen.text)
             }
 
             onStage(StageUpdate(GenerationStage.FINALIZATION, analysis, productModel, creativePlan, bundle))
@@ -283,8 +290,10 @@ TikTok Shop Mode: ${input.tiktokShopMode}
         input: PipelineInput,
         productModelJson: String,
         creativePlanJson: String
-    ): String {
-        if (input.voiceLanguage == VoiceLanguage.OFF) return "OFF"
+    ): VoiceoverSystem.Result {
+        if (input.voiceLanguage == VoiceLanguage.OFF) {
+            return VoiceoverSystem.Result("OFF", emptyList())
+        }
         val voice = input.voiceLanguage.name
         val first = openAi.chat(
             apiKey = input.apiKey,
@@ -295,11 +304,12 @@ TikTok Shop Mode: ${input.tiktokShopMode}
                 creativePlanJson = creativePlanJson,
                 wish = input.optionalWish
             ),
-            timeoutSeconds = 60,
+            timeoutSeconds = 90,
             jsonMode = true,
             temperature = 0.6,
-            maxTokens = 400,
-            maxAttempts = 2
+            maxTokens = 800,
+            maxAttempts = 2,
+            reasoningEffort = "low"
         ).getOrNull()
         var result = VoiceoverSystem.finalize(
             raw = VoiceoverSystem.extractSpokenLine(first.orEmpty()),
@@ -322,11 +332,12 @@ TikTok Shop Mode: ${input.tiktokShopMode}
                     wish = input.optionalWish,
                     failedVoiceover = result.text.ifBlank { first.orEmpty() }
                 ),
-                timeoutSeconds = 60,
+                timeoutSeconds = 90,
                 jsonMode = true,
                 temperature = 0.5,
-                maxTokens = 400,
-                maxAttempts = 1
+                maxTokens = 800,
+                maxAttempts = 2,
+                reasoningEffort = "low"
             ).getOrNull()
             if (repaired != null) {
                 result = VoiceoverSystem.finalize(
@@ -336,7 +347,7 @@ TikTok Shop Mode: ${input.tiktokShopMode}
                 )
             }
         }
-        return result.text
+        return result
     }
 
     private fun buildFinalUserPrompt(
@@ -345,16 +356,8 @@ TikTok Shop Mode: ${input.tiktokShopMode}
         analysisJson: String,
         wish: String,
         voice: VoiceLanguage,
-        tiktok: Boolean,
-        lockedVoiceover: String = ""
+        tiktok: Boolean
     ): String {
-        val voLock = if (voice == VoiceLanguage.OFF) {
-            "LOCKED VOICEOVER: OFF"
-        } else if (lockedVoiceover.isNotBlank()) {
-            "LOCKED VOICEOVER (copy exactly into VOICEOVER and json.voiceover):\n$lockedVoiceover"
-        } else {
-            "VOICEOVER: write light natural ${voice.name} speech — benefit + one real feature + a soft invitation, never a buy-command."
-        }
         return """
 Create the final VEO 3.1 package.
 
@@ -370,7 +373,7 @@ $analysisJson
 OPTIONAL WISH: ${wish.ifBlank { "(none)" }}
 VOICE: ${voice.name}
 TIKTOK SHOP MODE: $tiktok
-$voLock
+VOICEOVER section: leave a short placeholder. The spoken line is generated separately.
 
 ${PromptTemplates.PRODUCT_FIDELITY_CORE}
 

@@ -43,7 +43,8 @@ class OpenAiClient(
         jsonMode: Boolean = true,
         temperature: Double = 0.4,
         maxTokens: Int = 4096,
-        maxAttempts: Int = 2
+        maxAttempts: Int = 2,
+        reasoningEffort: String? = null
     ): Result<String> {
         var lastError: AppError? = null
         repeat(maxAttempts) { attempt ->
@@ -57,7 +58,8 @@ class OpenAiClient(
                     timeoutSeconds = timeoutSeconds,
                     jsonMode = jsonMode,
                     temperature = temperature,
-                    maxTokens = maxTokens
+                    maxTokens = maxTokens,
+                    reasoningEffort = reasoningEffort
                 )
             }
             if (result.isSuccess) return result
@@ -80,7 +82,8 @@ class OpenAiClient(
         timeoutSeconds: Long,
         jsonMode: Boolean,
         temperature: Double,
-        maxTokens: Int
+        maxTokens: Int,
+        reasoningEffort: String? = null
     ): String {
         val userContent = buildJsonArray {
             add(buildJsonObject {
@@ -115,7 +118,10 @@ class OpenAiClient(
             }
             if (gpt5) {
                 put("max_completion_tokens", JsonPrimitive(tokenLimit))
-                put("reasoning_effort", JsonPrimitive(OpenAiModelCatalog.reasoningEffort(model)))
+                put(
+                    "reasoning_effort",
+                    JsonPrimitive(reasoningEffort ?: OpenAiModelCatalog.reasoningEffort(model))
+                )
             } else {
                 put("temperature", JsonPrimitive(temperature))
                 put("max_tokens", JsonPrimitive(tokenLimit))
@@ -135,8 +141,10 @@ class OpenAiClient(
                 throw ErrorMapper.fromHttp(response.code, raw)
             }
             val parsed = json.decodeFromString(ChatCompletionResponse.serializer(), raw)
-            val content = parsed.choices.firstOrNull()?.message?.content
-                ?: throw AppError.Unknown("Empty model response")
+            val content = parsed.choices.firstOrNull()?.message?.content?.trim().orEmpty()
+            if (content.isBlank()) {
+                throw AppError.Server("Empty model response")
+            }
             return content
         }
     }

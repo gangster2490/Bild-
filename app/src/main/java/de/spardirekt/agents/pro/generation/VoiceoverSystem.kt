@@ -1,7 +1,9 @@
 package de.spardirekt.agents.pro.generation
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -150,12 +152,9 @@ REWRITE in the light natural TikTok spoken style. No command CTA. Keep product-t
         failedVoiceover: String? = null
     ): String = buildString {
         appendLine("Write the spoken voiceover from this evidence.")
+        appendLine("Output only the spoken words in the required language.")
         appendLine()
-        appendLine("PRODUCT MODEL:")
-        appendLine(productModelJson)
-        appendLine()
-        appendLine("CREATIVE PLAN:")
-        appendLine(creativePlanJson)
+        appendLine(compactEvidence(productModelJson, creativePlanJson))
         appendLine()
         appendLine("OPTIONAL WISH: ${wish.ifBlank { "(none)" }}")
         if (!failedVoiceover.isNullOrBlank()) {
@@ -165,13 +164,64 @@ REWRITE in the light natural TikTok spoken style. No command CTA. Keep product-t
         }
     }.trim()
 
+    fun compactEvidence(productModelJson: String, creativePlanJson: String): String {
+        val product = jsonObject(productModelJson)
+        val plan = jsonObject(creativePlanJson)
+        val lines = buildList {
+            stringField(product, "productIdentity")?.let { add("Product: $it") }
+            stringField(product, "productCategory")?.let { add("Category: $it") }
+            listField(product, "visualSignature").takeIf { it.isNotEmpty() }?.let {
+                add("Look: ${it.take(8).joinToString(", ")}")
+            }
+            listField(product, "confirmedFunctions").takeIf { it.isNotEmpty() }?.let {
+                add("Confirmed function: ${it.take(3).joinToString(", ")}")
+            }
+            stringField(plan, "heroFeature")?.let { add("Hero feature: $it") }
+            stringField(plan, "salesAngle")?.let { add("Sales angle: $it") }
+            stringField(plan, "hookIdea")?.let { add("Hook: $it") }
+            stringField(plan, "strategy")?.let { add("Strategy: $it") }
+        }
+        if (lines.isNotEmpty()) return lines.joinToString("\n")
+        return """
+PRODUCT MODEL:
+${productModelJson.take(1200)}
+
+CREATIVE PLAN:
+${creativePlanJson.take(800)}
+""".trim()
+    }
+
     fun extractSpokenLine(raw: String): String {
         if (raw.isBlank()) return ""
         val payload = JsonExtractor.extract(raw)
         val fromJson = runCatching {
-            json.parseToJsonElement(payload).jsonObject["voiceover"]?.jsonPrimitive?.contentOrNull
+            val el = json.parseToJsonElement(payload)
+            val obj = el.jsonObject
+            sequenceOf("voiceover", "spoken", "line", "text")
+                .mapNotNull { key ->
+                    val value = obj[key] ?: return@mapNotNull null
+                    value.jsonPrimitive.contentOrNull
+                        ?: runCatching { value.jsonObject["voiceover"]?.jsonPrimitive?.contentOrNull }.getOrNull()
+                        ?: runCatching { value.jsonObject["text"]?.jsonPrimitive?.contentOrNull }.getOrNull()
+                }
+                .firstOrNull { !it.isNullOrBlank() }
         }.getOrNull()
-        return (fromJson ?: if (payload.startsWith("{")) "" else payload).trim()
+        val spoken = fromJson?.trim().orEmpty()
+        if (spoken.isNotBlank()) return spoken
+        if (payload.startsWith("{")) return ""
+        return payload.trim()
+    }
+
+    fun choose(
+        generated: Result,
+        fallbackRaw: String,
+        language: String,
+        tiktokShop: Boolean = true
+    ): Result {
+        if (generated.acceptable) return generated
+        val fallback = finalize(fallbackRaw, language, tiktokShop)
+        if (fallback.acceptable) return fallback
+        return if (generated.text.isNotBlank()) generated else fallback
     }
 
     fun finalize(raw: String, language: String, tiktokShop: Boolean = true): Result {
@@ -360,5 +410,23 @@ REWRITE in the light natural TikTok spoken style. No command CTA. Keep product-t
             "jetzt kaufen", "buy now"
         )
         return lower in slogans
+    }
+
+    private fun jsonObject(raw: String): JsonObject? = runCatching {
+        json.parseToJsonElement(JsonExtractor.extract(raw)).jsonObject
+    }.getOrNull()
+
+    private fun stringField(obj: JsonObject?, key: String): String? {
+        val value = obj?.get(key)?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+        return value.takeIf { it.isNotBlank() && it != "null" }
+    }
+
+    private fun listField(obj: JsonObject?, key: String): List<String> {
+        val el = obj?.get(key) ?: return emptyList()
+        runCatching {
+            return el.jsonArray.mapNotNull { it.jsonPrimitive.contentOrNull?.trim() }.filter { it.isNotBlank() }
+        }
+        val single = el.jsonPrimitive.contentOrNull?.trim().orEmpty()
+        return if (single.isBlank()) emptyList() else listOf(single)
     }
 }
