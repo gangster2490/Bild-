@@ -3,13 +3,13 @@ package de.spardirekt.agents.pro.network
 import de.spardirekt.agents.pro.diagnostics.AppError
 import de.spardirekt.agents.pro.diagnostics.ErrorMapper
 import kotlinx.coroutines.delay
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.encodeToJsonElement
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -92,7 +92,7 @@ class OpenAiClient(
                     put("type", JsonPrimitive("image_url"))
                     put("image_url", buildJsonObject {
                         put("url", JsonPrimitive(url))
-                        put("detail", JsonPrimitive("high"))
+                        put("detail", JsonPrimitive(OpenAiModelCatalog.imageDetail(model)))
                     })
                 })
             }
@@ -103,20 +103,29 @@ class OpenAiClient(
             ChatMessage(role = "user", content = userContent)
         )
 
-        val body = ChatCompletionRequest(
-            model = model,
-            messages = messages,
-            temperature = temperature,
-            maxTokens = maxTokens,
-            responseFormat = if (jsonMode) ResponseFormat("json_object") else null
-        )
+        val gpt5 = OpenAiModelCatalog.isGpt5Family(model)
+        val requestBody = buildJsonObject {
+            put("model", JsonPrimitive(model))
+            put("messages", json.encodeToJsonElement(messages))
+            if (jsonMode) {
+                put("response_format", buildJsonObject {
+                    put("type", JsonPrimitive("json_object"))
+                })
+            }
+            if (gpt5) {
+                put("max_completion_tokens", JsonPrimitive(maxTokens))
+                put("reasoning_effort", JsonPrimitive(OpenAiModelCatalog.reasoningEffort(model)))
+            } else {
+                put("temperature", JsonPrimitive(temperature))
+                put("max_tokens", JsonPrimitive(maxTokens))
+            }
+        }
 
-        val requestJson = json.encodeToString(body)
         val request = Request.Builder()
             .url("https://api.openai.com/v1/chat/completions")
             .addHeader("Authorization", "Bearer $apiKey")
             .addHeader("Content-Type", "application/json")
-            .post(requestJson.toRequestBody("application/json".toMediaType()))
+            .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
         clientFor(timeoutSeconds).newCall(request).execute().use { response ->

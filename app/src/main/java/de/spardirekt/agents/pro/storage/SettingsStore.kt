@@ -8,6 +8,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import de.spardirekt.agents.pro.model.AppMode
 import de.spardirekt.agents.pro.model.CreativeMode
 import de.spardirekt.agents.pro.model.VoiceLanguage
+import de.spardirekt.agents.pro.network.OpenAiModelCatalog
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -33,7 +34,7 @@ class SettingsStore(private val context: Context) {
         val defaultCreative: CreativeMode = CreativeMode.Auto,
         val tiktokShopMode: Boolean = true,
         val historyFormat: String = "full",
-        val model: String = "gpt-4o",
+        val model: String = OpenAiModelCatalog.DEFAULT,
         val debugLogs: Boolean = false,
         val outputLanguage: String = "RU",
         val lastProjectId: String = ""
@@ -52,7 +53,7 @@ class SettingsStore(private val context: Context) {
             }.getOrDefault(CreativeMode.Auto),
             tiktokShopMode = p[Keys.tiktok] ?: true,
             historyFormat = p[Keys.historyFormat] ?: "full",
-            model = p[Keys.model] ?: "gpt-4o",
+            model = OpenAiModelCatalog.sanitize(p[Keys.model]),
             debugLogs = p[Keys.debugLogs] ?: false,
             outputLanguage = p[Keys.outputLanguage] ?: "RU",
             lastProjectId = p[Keys.lastProjectId].orEmpty()
@@ -80,7 +81,9 @@ class SettingsStore(private val context: Context) {
     }
 
     suspend fun setModel(model: String) {
-        context.settingsDataStore.edit { it[Keys.model] = model }
+        context.settingsDataStore.edit {
+            it[Keys.model] = OpenAiModelCatalog.sanitize(model)
+        }
     }
 
     suspend fun setDebugLogs(on: Boolean) {

@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -42,6 +43,7 @@ import de.spardirekt.agents.pro.BuildConfig
 import de.spardirekt.agents.pro.VeoPromptProApp
 import de.spardirekt.agents.pro.model.AppMode
 import de.spardirekt.agents.pro.model.VoiceLanguage
+import de.spardirekt.agents.pro.network.OpenAiModelCatalog
 import de.spardirekt.agents.pro.ui.components.AppHeader
 import de.spardirekt.agents.pro.ui.components.GradientHeading
 import de.spardirekt.agents.pro.ui.components.NavyCard
@@ -285,14 +287,55 @@ fun SettingsScreen(
             Text("Диагностика", style = type.sectionTitle.copy(color = VppColors.textDark))
             Spacer(Modifier.height(10.dp))
             NavyCard {
-                Text("Model", style = type.secondary.copy(color = VppColors.textMuted))
-                Spacer(Modifier.height(8.dp))
-                SegmentedControl(
-                    options = listOf("gpt-4o", "gpt-4o-mini"),
-                    selected = sett.model,
-                    onSelect = viewModel::setModel
+                Text("OpenAI Model", style = type.cardTitle.copy(color = VppColors.textLight))
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Используется для анализа фото и VEO Prompt.",
+                    style = type.secondary.copy(color = VppColors.textMuted, fontSize = 12.sp)
                 )
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(12.dp))
+                OpenAiModelCatalog.options.forEach { option ->
+                    val selected = sett.model == option.id
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .then(
+                                if (selected) Modifier.background(VppColors.cardInset)
+                                else Modifier.background(Color.Transparent)
+                            )
+                            .clickable { viewModel.setModel(option.id) }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                option.label,
+                                style = type.body.copy(
+                                    color = VppColors.textLight,
+                                    fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.Bold
+                                    else androidx.compose.ui.text.font.FontWeight.Normal
+                                ),
+                                maxLines = 1
+                            )
+                            Text(
+                                option.id,
+                                style = type.secondary.copy(color = VppColors.textMuted, fontSize = 11.sp),
+                                maxLines = 1
+                            )
+                            Text(
+                                option.hint,
+                                style = type.secondary.copy(color = VppColors.textMuted, fontSize = 11.sp),
+                                maxLines = 1
+                            )
+                        }
+                        if (selected) {
+                            StatusPill("Выбран ✓", success = true)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         "Debug logs",
@@ -317,7 +360,7 @@ fun SettingsScreen(
                 Text("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", style = type.cardTitle.copy(color = VppColors.textLight))
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Private VEO 3.1 prompt generator · 3.1",
+                    "Private VEO 3.1 prompt generator · 3.2",
                     style = type.secondary.copy(color = VppColors.textMuted)
                 )
             }
