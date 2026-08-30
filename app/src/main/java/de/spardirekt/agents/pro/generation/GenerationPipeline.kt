@@ -353,7 +353,7 @@ TikTok Shop Mode: ${input.tiktokShopMode}
         } else if (lockedVoiceover.isNotBlank()) {
             "LOCKED VOICEOVER (copy exactly into VOICEOVER and json.voiceover):\n$lockedVoiceover"
         } else {
-            "VOICEOVER: write natural ${voice.name} speech, benefit + one real feature + soft CTA."
+            "VOICEOVER: write light natural ${voice.name} speech — benefit + one real feature + a soft invitation, never a buy-command."
         }
         return """
 Create the final VEO 3.1 package.

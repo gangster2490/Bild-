@@ -63,33 +63,76 @@ You are not writing a VEO prompt, title, hashtags, shot list, or on-screen text.
 Return JSON only: {"voiceover":"..."}
 
 VOICE LANGUAGE: $voice
-${when (voice.uppercase()) {
-        "DE" -> """
-German only. Natural spoken German — as a real person would say it in a short product clip.
-Target ${DE_MIN_WORDS}–$DE_MAX_WORDS spoken words. Must comfortably fit in 8 seconds.
-No English. No Russian. No catalogue copy. No robotic narrator.
-""".trim()
-        "RU" -> """
-Russian only. Natural spoken Russian — as a real person would say it in a short product clip.
-Target ${RU_MIN_WORDS}–$RU_MAX_WORDS spoken words. Must comfortably fit in 8 seconds.
-No German. No English-only slogans. No catalogue copy. No robotic narrator.
-""".trim()
-        else -> "Voice is OFF. Return {\"voiceover\":\"OFF\"}."
-    }}
+${languageStyle(voice)}
 
-STRUCTURE (exactly this, one or two sentences):
-1) main real benefit
-2) one supporting real feature from the product evidence
-3) one soft CTA
+SPOKEN STYLE — THIS IS THE POINT:
+Light, natural, TikTok-friendly. Confident, useful, attractive, simple.
+Talk like one person showing the product to one person — not a narrator, not a shop catalogue, not a radio ad.
+The product should feel desirable without aggressive hard-selling.
+
+SOUND:
+- spoken, warm, specific
+- everyday words
+- one breath, one or two short sentences
+
+DO NOT SOUND LIKE:
+- robotic narrator
+- catalogue listing (“high quality”, “ideal for”, “perfect for everyday use”)
+- fake hype (“best ever”, “must have”, “viral”)
+- fake urgency or scarcity
+- command selling
+
+STRUCTURE:
+1) one real benefit in spoken words
+2) one supporting real feature from the evidence
+3) one SOFT invitation — not a command
+
+${ctaStyle(tiktokShop)}
+
+FORBIDDEN SPOKEN CTAs (never use):
+Закажите / Заказывайте / Купите / Покупайте
+Jetzt bestellen / Jetzt kaufen / Einfach bestellen / Bestellen Sie / Hol dir / Shop now
+“Закажите. Закажите в TikTok Shop.”
+
+GOOD STYLE:
+DE: "Der schwarze Rahmen bleibt leicht und klappt klein. Schau ihn dir im TikTok Shop an."
+RU: "Чёрный каркас с красным столиком складывается за секунды. Загляни в TikTok Shop."
+
+BAD STYLE:
+DE: "Hochwertiger Premium-Stuhl, ideal für Camping. Jetzt bestellen."
+RU: "Качественный товар премиум-класса. Закажите в TikTok Shop."
 
 RULES:
 - Use only facts from the product model / creative plan. No invented functions.
-- No empty generic slogans (Must See, Shop Now, Лучшее качество, Premium Qualität).
-- No duplicate words. No duplicate CTA. Forbidden: "Закажите. Закажите в TikTok Shop."
-- No quotes, no speaker labels, no stage directions.
-- TikTok Shop Mode: ${if (tiktokShop) "ON — one soft CTA is allowed to mention TikTok Shop once" else "OFF — do not mention TikTok Shop"}.
+- No quotes, speaker labels, or stage directions.
+- No duplicate words. No duplicate CTA.
 - The JSON field voiceover must be the exact spoken line, nothing else.
 """.trimIndent()
+
+    private fun languageStyle(voice: String): String = when (voice.uppercase()) {
+        "DE" -> """
+German only — natural spoken German, as someone would actually say it in a short clip.
+Target ${DE_MIN_WORDS}–$DE_MAX_WORDS spoken words. Must fit comfortably in 8 seconds.
+No English. No Russian. Informal-friendly is fine (du), never stiff catalogue German.
+""".trim()
+        "RU" -> """
+Russian only — natural spoken Russian, as someone would actually say it in a short clip.
+Target ${RU_MIN_WORDS}–$RU_MAX_WORDS spoken words. Must fit comfortably in 8 seconds.
+No German. No English-only slogans. Conversational, not advertising-copy Russian.
+""".trim()
+        else -> "Voice is OFF. Return {\"voiceover\":\"OFF\"}."
+    }
+
+    private fun ctaStyle(tiktokShop: Boolean): String = if (tiktokShop) {
+        """
+SOFT CTA (TikTok Shop Mode ON): an invitation, one mention of TikTok Shop is allowed.
+DE: "schau ihn dir im TikTok Shop an" / "gibt's im TikTok Shop"
+RU: "загляни в TikTok Shop" / "есть в TikTok Shop"
+Not a buy-command.
+""".trim()
+    } else {
+        "TikTok Shop Mode OFF: do not mention TikTok Shop. End with a soft look/try invitation, never a buy-command."
+    }
 
     fun repairPrompt(voice: String, tiktokShop: Boolean, issues: List<String>): String = """
 ${systemPrompt(voice, tiktokShop)}
@@ -97,7 +140,7 @@ ${systemPrompt(voice, tiktokShop)}
 REWRITE the voiceover. It failed local checks:
 ${issues.joinToString("\n") { "- $it" }}
 
-Keep product-true facts. Do not copy the failed line. Return JSON only.
+REWRITE in the light natural TikTok spoken style. No command CTA. Keep product-true facts. Do not copy the failed line. Return JSON only.
 """.trimIndent()
 
     fun userPrompt(
@@ -178,8 +221,11 @@ Keep product-true facts. Do not copy the failed line. Return JSON only.
         if (isCtaOnly(text)) {
             issues += "cta_only"
         }
-        if (isGenericSlogan(text)) {
-            issues += "generic_slogan"
+        if (hasHardSellCta(text)) {
+            issues += "hard_sell_cta"
+        }
+        if (isGenericSlogan(text) || hasCatalogueLanguage(text)) {
+            issues += "catalogue_language"
         }
         if (!tiktokShop && text.lowercase().contains("tiktok shop")) {
             issues += "tiktok_shop_mention"
@@ -291,6 +337,19 @@ Keep product-true facts. Do not copy the failed line. Return JSON only.
             .replace(Regex(" +([,.;:!?…])"), "$1")
             .replace(Regex("\\s+"), " ")
             .trim()
+    }
+
+    private fun hasHardSellCta(text: String): Boolean = ctaVerbCount(text) > 0
+
+    private fun hasCatalogueLanguage(text: String): Boolean {
+        val lower = text.lowercase()
+        val snippets = listOf(
+            "ideal für", "perfekt für", "hochwertig", "beste qualität", "must have",
+            "best ever", "premium-stuhl", "premium stuhl",
+            "идеально для", "премиум-класса", "премиум класса", "высокое качество",
+            "лучший выбор", "качественный товар"
+        )
+        return snippets.any { lower.contains(it) }
     }
 
     private fun isGenericSlogan(text: String): Boolean {

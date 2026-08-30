@@ -310,10 +310,12 @@ Generate voiceover after creative planning.
 
 German: natural spoken German. Target approximately 12–18 spoken words.
 Russian: natural spoken Russian. Target approximately 14–22 spoken words.
-No robotic narrator. No catalogue language. No empty generic slogans.
+Spoken style: light, natural, TikTok-friendly. Talk like one person showing the product to one person.
+No robotic narrator. No catalogue language. No empty generic slogans. No aggressive hard-selling.
+Soft invitation only — never command CTAs (Закажите, Купите, Jetzt bestellen, Jetzt kaufen).
 The entire voiceover must comfortably fit inside 8 seconds.
 
-Structure: main benefit + one supporting real feature + soft CTA.
+Structure: main benefit + one supporting real feature + soft invitation.
 Before output: remove duplicate words, duplicate CTA and awkward punctuation.
 
 ==================================================

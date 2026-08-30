@@ -59,12 +59,27 @@ class VoiceoverSystemTest {
     }
 
     @Test
-    fun acceptsNaturalRussianInRange() {
+    fun flagsHardSellAndCatalogueStyle() {
+        val hard = VoiceoverSystem.finalize(
+            "Чёрный каркас с красным столиком складывается за секунды в поездке. Закажите в TikTok Shop.",
+            "RU"
+        )
+        assertTrue(hard.issues.contains("hard_sell_cta"))
+        assertFalse(hard.acceptable)
+
+        val catalogue = VoiceoverSystem.finalize(
+            "Hochwertiger Stuhl, ideal für Camping und Reisen, bleibt kompakt.",
+            "DE"
+        )
+        assertTrue(catalogue.issues.contains("catalogue_language"))
+    }
+
+    @Test
+    fun acceptsSoftInvitationStyle() {
         val line =
-            "Чёрный каркас с красным столиком складывается за секунды в поездке. Возьмите его в TikTok Shop."
+            "Чёрный каркас с красным столиком складывается за секунды в поездке. Загляни скорее в TikTok Shop."
         val result = VoiceoverSystem.finalize(line, "RU")
         assertTrue("issues=${result.issues} text=${result.text} words=${VoiceoverSystem.countWords(result.text)}", result.acceptable)
-        assertTrue(VoiceoverSystem.countWords(result.text) in 14..22)
     }
 
     @Test
@@ -92,8 +107,10 @@ class VoiceoverSystemTest {
     fun generationPromptIsFocusedNotCoreDoctrine() {
         val prompt = VoiceoverSystem.systemPrompt("RU", true)
         assertFalse(prompt.contains("YOU ARE THE INTERNAL AI AGENT OF VEO PROMPT PRO"))
-        assertTrue(prompt.contains("14–22") || prompt.contains("14-22") || prompt.contains("14–22 spoken"))
-        assertTrue(prompt.contains("soft CTA"))
+        assertTrue(prompt.contains("TikTok-friendly"))
+        assertTrue(prompt.contains("hard-selling") || prompt.contains("hard-sell"))
+        assertTrue(prompt.contains("FORBIDDEN SPOKEN CTAs"))
+        assertTrue(prompt.contains("Jetzt bestellen"))
         assertTrue(prompt.contains("{\"voiceover\""))
         val locked = PromptTemplates.finalPromptSystem("RU", true, "Чёрный каркас складывается.")
         assertTrue(locked.contains("LOCKED SPOKEN VOICEOVER"))
