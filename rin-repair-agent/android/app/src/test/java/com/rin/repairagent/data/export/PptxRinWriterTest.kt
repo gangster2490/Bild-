@@ -83,6 +83,20 @@ class PptxRinWriterTest {
             assertTrue(slide2.contains("Инструменты: ключ 9 мм"))
             assertFalse(slide2.contains("Фото 1:"))
             assertTrue(slide2.contains("•") || slide2.contains("Сделайте шаг 1"))
+            val slide3 = zip.getInputStream(zip.getEntry("ppt/slides/slide3.xml")).bufferedReader().readText()
+            val slide4 = zip.getInputStream(zip.getEntry("ppt/slides/slide4.xml")).bufferedReader().readText()
+            assertTrue(slide3.contains("Сделайте шаг 2"))
+            assertFalse(slide3.contains("Сделайте шаг 1"))
+            assertTrue(slide4.contains("Сделайте шаг 3"))
+            assertFalse(slide4.contains("Сделайте шаг 1"))
+            val rels2 = zip.getInputStream(zip.getEntry("ppt/slides/_rels/slide2.xml.rels")).bufferedReader().readText()
+            val rels3 = zip.getInputStream(zip.getEntry("ppt/slides/_rels/slide3.xml.rels")).bufferedReader().readText()
+            val rels4 = zip.getInputStream(zip.getEntry("ppt/slides/_rels/slide4.xml.rels")).bufferedReader().readText()
+            assertTrue(rels2.contains("rin_photo_1.jpg"))
+            assertTrue(rels3.contains("rin_photo_2.jpg"))
+            assertTrue(rels4.contains("rin_photo_3.jpg"))
+            assertFalse(rels3.contains("rin_photo_1.jpg"))
+            assertFalse(rels4.contains("rin_photo_1.jpg"))
         }
     }
 
@@ -166,8 +180,11 @@ class PptxRinWriterTest {
             assertTrue(slide1.contains("cx=\"800000\"") && slide1.contains("cy=\"500000\""))
             val slide3Rels = zip.getInputStream(zip.getEntry("ppt/slides/_rels/slide3.xml.rels"))
                 .bufferedReader().readText()
-            assertTrue(slide3Rels.contains("rin_step_2.jpg"))
+            assertTrue(slide3Rels.contains("rin_photo_2.jpg"))
+            assertFalse(slide3Rels.contains("rin_photo_1.jpg"))
             val slide3 = zip.getInputStream(zip.getEntry("ppt/slides/slide3.xml")).bufferedReader().readText()
+            assertTrue(slide3.contains("Сделайте шаг 2"))
+            assertFalse(slide3.contains("Сделайте шаг 1"))
             assertTrue(slide3.contains("id=\"10010\"") || slide3.contains("id=\"10002\""))
         }
     }

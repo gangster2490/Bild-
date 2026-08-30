@@ -347,7 +347,7 @@ class RinRepository(
             val instruction = photo.userEditedInstruction ?: analysis.beginnerInstruction
             ExportStep(
                 photo = photo,
-                analysis = analysis,
+                analysis = analysis.copy(photoNumber = photo.photoNumber),
                 instructionRu = instruction,
                 instructionEn = analysis.beginnerInstructionEn.ifBlank { instruction }
             )

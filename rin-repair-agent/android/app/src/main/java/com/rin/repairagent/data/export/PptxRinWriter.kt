@@ -75,11 +75,9 @@ object PptxRinWriter {
 
         val repeatIdx = pickRepeatingSlideIndex(infos)
         val prefix = infos.subList(0, repeatIdx)
-        val trailing = trailingSlides(infos, repeatIdx)
-
-        val prototype = infos[repeatIdx]
-        val protoRelsPath = relsForSlide(prototype.path)
-        val protoRels = parts[protoRelsPath]?.toString(Charsets.UTF_8) ?: emptyRels()
+        val cluster = contentCluster(infos, repeatIdx)
+        val trailing = trailingAfterCluster(infos, repeatIdx)
+        val prototype = cluster.first()
 
         var nextSlideNum = existingSlideNumbers(parts).maxOrNull() ?: 1
         var nextRelId = maxRid(relsXml) + 1
@@ -122,36 +120,49 @@ object PptxRinWriter {
                 "Фото ${step.photo.photoNumber} отсутствует"
             }
 
+            val source = if (index < cluster.size) cluster[index] else prototype
+            val clone = index >= cluster.size
             val slidePath: String
             val slideRelsPath: String
-            val sourceXml: String
-            val sourceRels: String
-            if (index == 0) {
-                slidePath = prototype.path
-                slideRelsPath = protoRelsPath
-                sourceXml = prototype.xml
-                sourceRels = protoRels
+            if (!clone) {
+                slidePath = source.path
+                slideRelsPath = relsForSlide(source.path)
             } else {
                 nextSlideNum++
+                while (parts.containsKey("ppt/slides/slide$nextSlideNum.xml")) nextSlideNum++
                 slidePath = "ppt/slides/slide$nextSlideNum.xml"
                 slideRelsPath = relsForSlide(slidePath)
-                sourceXml = uniquifyCNvPrIds(prototype.xml, index * 10_000)
-                sourceRels = protoRels
             }
+            val sourceRels = parts[relsForSlide(source.path)]?.toString(Charsets.UTF_8) ?: emptyRels()
+            val sourceInfo = SlideInfo(
+                path = slidePath,
+                xml = source.xml,
+                pics = parsePics(source.xml),
+                texts = parseTextShapes(source.xml),
+                slideSize = templateSize
+            )
 
-            val mediaPath = "ppt/media/rin_step_${index + 1}.jpg"
+            val mediaPath = "ppt/media/rin_photo_${step.photo.photoNumber}.jpg"
             parts[mediaPath] = photo.readBytes()
-            val replaced = replaceContent(sourceXml, sourceRels, prototype, filled, mediaPath)
-            parts[slidePath] = replaced.slideXml.toByteArray(Charsets.UTF_8)
+            val replaced = replaceContent(
+                slideXml = source.xml,
+                relsXml = sourceRels,
+                info = sourceInfo,
+                texts = filled,
+                mediaPath = mediaPath,
+                imageRid = "rIdRinImg"
+            )
+            val xmlOut = if (clone) uniquifyCNvPrIds(replaced.slideXml, index * 10_000) else replaced.slideXml
+            parts[slidePath] = xmlOut.toByteArray(Charsets.UTF_8)
             parts[slideRelsPath] = replaced.relsXml.toByteArray(Charsets.UTF_8)
 
-            val relId = if (index == 0) {
-                relIdForTarget(relsXml, prototype.path.removePrefix("ppt/"))
+            val relId = if (!clone) {
+                relIdForTarget(relsXml, source.path.removePrefix("ppt/"))
                     ?: "rId${nextRelId++}"
             } else {
                 "rId${nextRelId++}"
             }
-            val sldId = if (index == 0) {
+            val sldId = if (!clone) {
                 sldIdForRid(presXml, relId) ?: nextSldId++
             } else {
                 nextSldId++
@@ -180,7 +191,8 @@ object PptxRinWriter {
 
     private data class Pic(
         val x: Long, val y: Long, val cx: Long, val cy: Long,
-        val embed: String, val block: String
+        val embed: String, val block: String,
+        val name: String = ""
     ) {
         val area: Long get() = cx * cy
     }
@@ -203,10 +215,11 @@ object PptxRinWriter {
         val contentPicture: Pic?
             get() {
                 val (sw, sh) = slideSize
-                val slideArea = (sw * sh).takeIf { it > 0 } ?: return pics.maxByOrNull { it.area }
-                val large = pics.filter { it.area * 100 / slideArea >= MIN_PHOTO_PCT }
-                return large.maxByOrNull { it.area } ?: pics.filter { !looksLikeLogoPic(it, slideArea) }
-                    .maxByOrNull { it.area }
+                val slideArea = (sw * sh).takeIf { it > 0 } ?: 1L
+                val content = pics.filter { isContentPic(it, slideArea) }
+                return content.maxByOrNull { it.area.coerceAtLeast(1L) }
+                    ?: pics.filter { it.embed.isNotBlank() && !looksLikeLogoPic(it, slideArea) }
+                        .maxByOrNull { it.area.coerceAtLeast(1L) }
             }
     }
 
@@ -251,11 +264,19 @@ object PptxRinWriter {
         return hint
     }
 
-    private fun trailingSlides(infos: List<SlideInfo>, repeatIdx: Int): List<SlideInfo> {
-        if (repeatIdx >= infos.lastIndex) return emptyList()
-        // Keep only slides after the repeating cluster that are not themselves
-        // extra copies of the same photo layout (sample step slides).
-        val protoArea = infos[repeatIdx].contentPicture?.area ?: return infos.subList(repeatIdx + 1, infos.size)
+    private fun contentCluster(infos: List<SlideInfo>, repeatIdx: Int): List<SlideInfo> {
+        val last = lastClusterIndex(infos, repeatIdx)
+        return infos.subList(repeatIdx, last + 1)
+    }
+
+    private fun trailingAfterCluster(infos: List<SlideInfo>, repeatIdx: Int): List<SlideInfo> {
+        val last = lastClusterIndex(infos, repeatIdx)
+        return if (last + 1 < infos.size) infos.subList(last + 1, infos.size) else emptyList()
+    }
+
+    private fun lastClusterIndex(infos: List<SlideInfo>, repeatIdx: Int): Int {
+        if (repeatIdx >= infos.lastIndex) return repeatIdx
+        val protoArea = infos[repeatIdx].contentPicture?.area ?: return repeatIdx
         var lastSame = repeatIdx
         for (i in repeatIdx + 1 until infos.size) {
             val area = infos[i].contentPicture?.area ?: break
@@ -265,43 +286,60 @@ object PptxRinWriter {
                 break
             }
         }
-        return if (lastSame + 1 < infos.size) infos.subList(lastSame + 1, infos.size) else emptyList()
+        return lastSame
     }
 
     private fun looksLikeLogoPic(pic: Pic, slideArea: Long): Boolean {
+        val n = pic.name.lowercase()
+        if (n.contains("logo") || n.contains("icon") || n.contains("wordmark")) return true
         if (slideArea <= 0L) return false
+        if (pic.area <= 0L) return false
         return pic.area * 100 / slideArea < LOGO_MAX_PCT
+    }
+
+    private fun isContentPic(pic: Pic, slideArea: Long): Boolean {
+        if (pic.embed.isBlank()) return false
+        if (looksLikeLogoPic(pic, slideArea)) return false
+        if (pic.area <= 0L) return true
+        return slideArea <= 0L || pic.area * 100 / slideArea >= MIN_PHOTO_PCT
     }
 
     private fun replaceContent(
         slideXml: String,
         relsXml: String,
-        proto: SlideInfo,
+        info: SlideInfo,
         texts: FillTexts,
-        mediaPath: String
+        mediaPath: String,
+        imageRid: String
     ): ReplacedInner {
         var xml = slideXml
         var rels = relsXml
-        val pic = proto.contentPicture
+        val pic = info.contentPicture
         if (pic != null) {
             val target = "../media/${mediaPath.substringAfterLast('/')}"
-            val slideArea = (proto.slideSize.first * proto.slideSize.second).takeIf { it > 0 } ?: 1L
-            val embeds = proto.pics
+            val slideArea = (info.slideSize.first * info.slideSize.second).takeIf { it > 0 } ?: 1L
+            val embeds = info.pics
                 .filter { candidate ->
                     candidate.embed.isNotBlank() && (
                         candidate.embed == pic.embed ||
-                            (candidate.area >= pic.area * 85 / 100 && !looksLikeLogoPic(candidate, slideArea))
+                            (isContentPic(candidate, slideArea) && candidate.area >= pic.area * 85 / 100)
                         )
                 }
                 .map { it.embed }
                 .distinct()
                 .ifEmpty { listOf(pic.embed).filter { it.isNotBlank() } }
             for (embed in embeds) {
-                rels = upsertImageRel(rels, embed, target)
+                xml = xml.replace("""r:embed="$embed"""", """r:embed="$imageRid"""")
+            }
+            rels = upsertImageRel(rels, imageRid, target)
+            for (embed in embeds) {
+                if (embed != imageRid) {
+                    rels = dropRel(rels, embed)
+                }
             }
         }
 
-        val assignments = assignTexts(proto, texts)
+        val assignments = assignTexts(info, texts)
         for ((shape, value) in assignments) {
             val updated = replaceShapeText(shape.block, value)
             xml = replaceFirstOccurrence(xml, shape.block, updated)
@@ -672,7 +710,8 @@ object PptxRinWriter {
             val cx = ext?.let { attrLong(it.groupValues[1], "cx") } ?: 0L
             val cy = ext?.let { attrLong(it.groupValues[1], "cy") } ?: 0L
             if (embed.isBlank() && cx == 0L && cy == 0L) return@mapNotNull null
-            Pic(x = x, y = y, cx = cx, cy = cy, embed = embed, block = block)
+            val name = CNVPR_RE.find(block)?.let { attr(it.value, "name") }.orEmpty()
+            Pic(x = x, y = y, cx = cx, cy = cy, embed = embed, block = block, name = name)
         }.toList()
     }
 
@@ -809,6 +848,11 @@ object PptxRinWriter {
             }
         }
     }
+
+    private fun dropRel(relsXml: String, embedId: String): String =
+        REL_RE.replace(relsXml) { m ->
+            if (attr(m.groupValues[1], "Id") == embedId) "" else m.value
+        }
 
     private fun rewritePresentationRels(original: String, slideRels: String): String {
         val kept = REL_RE.findAll(original).mapNotNull { m ->
