@@ -373,7 +373,7 @@ VOICE: ${voice.name}
 TIKTOK SHOP MODE: $tiktok
 VOICEOVER section: leave a short placeholder. The spoken line is generated separately.
 
-${PromptTemplates.PRODUCT_FIDELITY_CORE}
+Keep PRODUCT LOCK short: one lock sentence + product-specific details only. No fidelity essays. No legacy sections (no VISUAL FIDELITY, no SAFETY AUDIT, no PRODUCT FIDELITY CORE).
 
 Remember: do not resend or rely on inventing unseen mechanisms.
 """.trimIndent()

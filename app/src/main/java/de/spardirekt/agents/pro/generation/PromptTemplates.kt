@@ -133,6 +133,8 @@ HASHTAGS must be EXACTLY 5.
 The VOICEOVER section and json.voiceover must be identical.
 Do NOT paste long internal fidelity essays into PRODUCT LOCK or CRITICAL.
 Do NOT duplicate marketplace rules across sections.
+Do NOT include legacy sections: VISUAL FIDELITY, PRODUCT FIDELITY, SAFETY AUDIT, QUALITY GATE, CREATIVE DIRECTOR, PRODUCT MODEL, PRIMARY/MAIN REFERENCE.
+Only the 12 required section headers may appear in veoPrompt.
 """.trimIndent()
         )
     }

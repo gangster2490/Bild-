@@ -313,4 +313,90 @@ HASHTAGS
         assertFalse(composed.contains("Preserve the exact overall silhouette"))
         assertTrue(composed.contains("black tubular") || composed.contains("red tray"))
     }
+
+    @Test
+    fun stripLegacySections_removesDoctrineBlocks_keepsOnlyRequiredTwelve() {
+        val dirty = """
+FORMAT
+Vertical 9:16. Exactly 8.0s.
+
+VISUAL FIDELITY
+Use the uploaded product photos as strict visual references.
+PRODUCT DESIGN = LOCKED.
+
+REFERENCES
+Photos confirm black tubular frame.
+
+PRODUCT FIDELITY CORE RULE
+Long doctrine essay that must not ship.
+
+PRODUCT LOCK
+Preserve black tubular frame and red tray.
+
+SETTING
+Studio
+
+HOOK
+Standalone hook essay that is not a final section.
+
+SHOT SEQUENCE
+0.0–2.0s — HOOK: tray
+2.0–4.0s — IDENTITY: full
+4.0–6.0s — FEATURE / DEMO: fold
+6.0–8.0s — HERO / CTA: hold
+
+ON-SCREEN TEXT
+Fold
+
+VOICEOVER
+OFF
+
+AUDIO
+Music
+
+CRITICAL
+Lock
+
+NEGATIVE PROMPT
+- no redesign
+
+TITLE
+Chair
+
+HASHTAGS
+#a #b #c #d #TikTokShop
+
+TIKTOK SHOP SAFETY AUDIT
+secret
+""".trimIndent()
+
+        val result = PromptCleanup.finalize(
+            rawPrompt = dirty,
+            voiceover = "OFF",
+            title = "Chair",
+            hashtags = listOf("#a", "#b", "#c", "#d", "#TikTokShop"),
+            voiceLanguage = "OFF",
+            marketplace = false,
+            tiktokShopMode = true
+        )
+
+        assertFalse(result.veoPrompt.contains("VISUAL FIDELITY"))
+        assertFalse(result.veoPrompt.contains("PRODUCT FIDELITY"))
+        assertFalse(result.veoPrompt.contains("PRODUCT DESIGN = LOCKED"))
+        assertFalse(result.veoPrompt.contains("TIKTOK SHOP SAFETY AUDIT"))
+        assertFalse(result.veoPrompt.contains("Long doctrine essay"))
+        // Standalone HOOK section gone; shot-line HOOK label may remain
+        assertFalse(Regex("""(?im)^HOOK\b""").containsMatchIn(result.veoPrompt))
+        assertTrue(result.veoPrompt.contains("0.0–2.0s — HOOK"))
+        assertTrue(result.veoPrompt.contains("black tubular") || result.veoPrompt.contains("red tray"))
+        assertTrue(result.veoPrompt.contains("FORMAT"))
+        assertTrue(result.veoPrompt.contains("PRODUCT LOCK"))
+        assertTrue(result.veoPrompt.contains("HASHTAGS"))
+        val issues = PromptCleanup.validateCompleteness(result.veoPrompt, result.hashtags)
+        assertTrue(
+            "legacy leftovers: ${issues.filter { it.startsWith("legacy_") }}",
+            issues.none { it.startsWith("legacy_section_") }
+        )
+        assertTrue(result.veoPrompt.length <= PromptCleanup.MAX_COPIED_PROMPT_CHARS)
+    }
 }

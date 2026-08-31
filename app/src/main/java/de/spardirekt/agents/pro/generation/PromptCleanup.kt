@@ -17,11 +17,61 @@ object PromptCleanup {
         "HASHTAGS"
     )
 
+    /**
+     * Headers that must never appear in the copied Gemini/VEO prompt.
+     * Models sometimes emit these from the internal agent doctrine.
+     */
+    private val LEGACY_SECTIONS = listOf(
+        "VISUAL FIDELITY",
+        "VISUAL FIDELITY CORE",
+        "VISUAL EVIDENCE",
+        "VISUAL EVIDENCE PRIORITY",
+        "VISUAL SIGNATURE",
+        "PRODUCT FIDELITY",
+        "PRODUCT FIDELITY CORE",
+        "PRODUCT FIDELITY CORE RULE",
+        "CORE PRINCIPLE",
+        "TIKTOK SHOP SAFETY AUDIT",
+        "SAFETY AUDIT",
+        "INTERNAL PRODUCT MODEL",
+        "INTERNAL SAFETY AUDIT",
+        "QUALITY GATE",
+        "QUALITY SCORES",
+        "CREATIVE DIRECTOR",
+        "CREATIVE PLAN",
+        "PRODUCT MODEL",
+        "PHOTO ANALYSIS",
+        "ANALYSIS SUMMARY",
+        "PHYSICAL PLAUSIBILITY",
+        "PRIMARY REFERENCE",
+        "MAIN REFERENCE",
+        "STORYBOARD",
+        "CAMERA NOTES",
+        "LIGHTING NOTES",
+        "TIMELINE NOTES",
+        "REGRESSION LOCKS",
+        "FINAL OWNER EXPERIENCE",
+        "SALES STYLE",
+        "ONE HERO FEATURE",
+        "VOICEOVER CLEANUP",
+        "COMPLETENESS",
+        "PIPELINE STAGES",
+        "HOOK",
+        "HANDS",
+        "PEOPLE",
+        "CONFIDENCE",
+        "FACT PRIORITY",
+        "MARKETPLACE NOISE",
+        "ОЗВУЧКА",
+        "НАЗВАНИЕ",
+        "ХЕШТЕГИ"
+    )
+
     /** Short lock line for the copied Gemini/VEO prompt — not the long internal doctrine essay. */
     private val SHORT_PRODUCT_LOCK =
         "Match uploaded product photos exactly. Do not replace or redesign."
 
-        private val SHORT_MARKETPLACE =
+    private val SHORT_MARKETPLACE =
         "Marketplace shots = reference only; no listing UI."
 
     private val SHORT_NEGATIVE = listOf(
@@ -60,6 +110,7 @@ object PromptCleanup {
         prompt = stripAfterHashtags(prompt)
         prompt = prompt.replace(Regex("(?is)\\n*TIKTOK SHOP SAFETY AUDIT[\\s\\S]*$"), "")
             .trim()
+        prompt = stripLegacySections(prompt)
 
         prompt = dedupeParagraphs(prompt)
         prompt = normalizePunctuation(prompt)
@@ -136,6 +187,7 @@ object PromptCleanup {
 
         prompt = stripAfterHashtags(prompt)
         prompt = prompt.replace(Regex("(?is)\\n*TIKTOK SHOP SAFETY AUDIT[\\s\\S]*$"), "").trim()
+        prompt = stripLegacySections(prompt)
         prompt = dedupeParagraphs(prompt)
         prompt = normalizePunctuation(prompt)
         prompt = removeDuplicateVisualFidelity(prompt)
@@ -220,6 +272,11 @@ object PromptCleanup {
         if (hashtags.size != 5) issues += "hashtag_count_${hashtags.size}"
         if (Regex("(?is)TIKTOK SHOP SAFETY AUDIT").containsMatchIn(prompt)) {
             issues += "safety_audit_leaked"
+        }
+        LEGACY_SECTIONS.forEach { legacy ->
+            if (Regex("""(?im)^${Regex.escape(legacy)}\s*:?\s*$""").containsMatchIn(prompt)) {
+                issues += "legacy_section_$legacy"
+            }
         }
         val after = prompt.substringAfterLast("HASHTAGS", "")
         val leftover = after.lineSequence().drop(1)
@@ -501,14 +558,73 @@ object PromptCleanup {
         val match = regex.find(prompt) ?: return ""
         val start = match.range.last + 1
         val rest = prompt.substring(start)
-        val next = REQUIRED_SECTIONS
+        val boundaryNames = (REQUIRED_SECTIONS + LEGACY_SECTIONS)
             .filter { !it.equals(section, true) }
+        val next = boundaryNames
             .mapNotNull { name ->
-                Regex("(?im)^$name\\b").find(rest)?.range?.first
+                val pattern = if (LEGACY_SECTIONS.any { it.equals(name, true) }) {
+                    // Standalone legacy header only
+                    Regex("""(?im)^${Regex.escape(name)}\s*:?\s*$""")
+                } else {
+                    Regex("""(?im)^${Regex.escape(name)}\b""")
+                }
+                pattern.find(rest)?.range?.first
             }
             .minOrNull()
         val body = if (next != null) rest.substring(0, next) else rest
-        return body.trim()
+        return stripLegacyInlineHeaders(body.trim())
+    }
+
+    /**
+     * Drop entire legacy doctrine blocks (header + body until next known header).
+     * Required 12-section structure is rebuilt afterward.
+     */
+    fun stripLegacySections(prompt: String): String {
+        if (prompt.isBlank()) return prompt
+        // Required headers may be followed by body on later lines.
+        // Legacy headers must be alone on the line (optional trailing ':') so we
+        // do not treat inline doctrine like "CORE PRINCIPLE: …" as a section cut.
+        val requiredAlt = REQUIRED_SECTIONS.joinToString("|") { Regex.escape(it) }
+        val legacyAlt = LEGACY_SECTIONS.joinToString("|") { Regex.escape(it) }
+        val headerRegex = Regex(
+            "(?im)^(?:(?:$requiredAlt)\\b\\s*:?\\s*|(?:$legacyAlt)\\s*:?\\s*$)"
+        )
+        val matches = headerRegex.findAll(prompt).toList()
+        if (matches.isEmpty()) return prompt
+
+        val allHeaders = (REQUIRED_SECTIONS + LEGACY_SECTIONS)
+            .distinctBy { it.uppercase() }
+            .sortedByDescending { it.length }
+
+        fun headerNameAt(index: Int): String {
+            val slice = prompt.substring(index, minOf(prompt.length, index + 80))
+            return allHeaders.first { h -> slice.startsWith(h, ignoreCase = true) }
+        }
+
+        val keep = StringBuilder()
+        for (i in matches.indices) {
+            val m = matches[i]
+            val name = headerNameAt(m.range.first)
+            val requiredName = REQUIRED_SECTIONS.firstOrNull { it.equals(name, true) }
+            if (requiredName == null) continue
+            val bodyStart = m.range.last + 1
+            val bodyEnd = matches.getOrNull(i + 1)?.range?.first ?: prompt.length
+            val body = stripLegacyInlineHeaders(prompt.substring(bodyStart, bodyEnd).trim())
+            if (keep.isNotEmpty()) keep.append("\n\n")
+            keep.append(requiredName)
+            if (body.isNotBlank()) {
+                keep.append('\n').append(body)
+            }
+        }
+        return if (keep.isEmpty()) prompt else keep.toString().trim() + "\n"
+    }
+
+    private fun stripLegacyInlineHeaders(body: String): String {
+        if (body.isBlank()) return body
+        // Only cut at true standalone legacy section headers (line = header only).
+        val legacyAlt = LEGACY_SECTIONS.joinToString("|") { Regex.escape(it) }
+        val cut = Regex("(?im)^(?:$legacyAlt)\\s*:?\\s*$").find(body)?.range?.first
+        return if (cut != null) body.substring(0, cut).trimEnd() else body.trim()
     }
 
     private fun replaceSection(prompt: String, section: String, body: String): String {
