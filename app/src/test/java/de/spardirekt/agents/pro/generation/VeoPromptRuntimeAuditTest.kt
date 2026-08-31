@@ -246,12 +246,18 @@ leaked
         if (off.voiceover == "OFF") pass("FC_VOICE_OFF", "voiceover='OFF'")
         else fail("FC_VOICE_OFF", "voiceover='${off.voiceover}'")
 
-        val marketplace = cleaned.veoPrompt.contains(
-            "marketplace screenshots are reference material only",
-            ignoreCase = true
-        )
+        val marketplace = cleaned.veoPrompt.contains("marketplace", ignoreCase = true) &&
+            cleaned.veoPrompt.contains("reference", ignoreCase = true)
         if (marketplace) pass("FC_MARKETPLACE_RULE", "present=true")
         else fail("FC_MARKETPLACE_RULE", "present=false")
+
+        row(
+            "FC_COPIED_PROMPT_SIMPLE",
+            if (!cleaned.veoPrompt.contains("PRODUCT DESIGN = LOCKED") &&
+                !cleaned.veoPrompt.contains("CORE PRINCIPLE")
+            ) "PASS" else "FAIL",
+            "len=${cleaned.veoPrompt.length} hasEssay=${cleaned.veoPrompt.contains("PRODUCT DESIGN = LOCKED")}"
+        )
 
         row("FC_VALIDATE_ISSUES", "OBS", "validateCompleteness=$completeness")
 

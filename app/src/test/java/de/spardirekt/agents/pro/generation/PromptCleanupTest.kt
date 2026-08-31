@@ -78,7 +78,11 @@ Something secret
         assertTrue(issues.none { it.startsWith("hashtag_count") })
         assertTrue(result.veoPrompt.contains("0.0"))
         assertTrue(result.veoPrompt.contains("8.0"))
-        assertTrue(result.veoPrompt.contains("marketplace screenshots are reference material only", ignoreCase = true))
+        assertTrue(result.veoPrompt.contains("marketplace", ignoreCase = true))
+        assertFalse(result.veoPrompt.contains("PRODUCT DESIGN = LOCKED"))
+        assertFalse(result.veoPrompt.contains("CORE PRINCIPLE"))
+        // Copied prompt stays concise — no long fidelity essay
+        assertTrue(result.veoPrompt.length < 2500)
     }
 
     @Test
@@ -144,6 +148,93 @@ HASHTAGS
         assertTrue(result.veoPrompt.contains("6.0–8.0s"))
         assertEquals(5, result.hashtags.size)
         assertEquals("OFF", result.voiceover)
+        assertFalse(result.veoPrompt.contains("Use the uploaded product photos as strict visual references"))
+    }
+
+    @Test
+    fun simplifyCopiedPrompt_stripsFidelityEssay_keepsProductDetails() {
+        val verbose = """
+FORMAT
+Vertical 9:16.
+Photorealistic commercial TikTok Shop product ad style.
+Generate exactly 8.0 seconds total.
+Timeline ends at 8.0s.
+
+REFERENCES
+${PromptTemplates.MARKETPLACE_RULE}
+
+Photos confirm black tubular frame and red tray.
+
+PRODUCT LOCK
+${PromptTemplates.PRODUCT_FIDELITY_CORE}
+
+Preserve black tubular X-braced frame, perforated upper backrest, red circular right-front tray, silver clamps, disc feet.
+
+SETTING
+Uncluttered premium studio environment with soft light and shallow depth of field and no clutter anywhere.
+
+SHOT SEQUENCE
+0.0–2.0s — HOOK: product visible immediately with strongest verified detail.
+2.0–4.0s — IDENTITY: clear full/product-true framing.
+4.0–6.0s — FEATURE / DEMO: one hero feature only, physically plausible.
+6.0–8.0s — HERO / CTA: desirable hero hold and soft CTA.
+Timeline ends at 8.0s. Four blocks only. No extra scenes.
+
+ON-SCREEN TEXT
+Compact fold
+
+VOICEOVER
+OFF
+
+AUDIO
+Subtle background music. Clear dominant voice. Realistic product-action sounds only when mechanism is visible.
+
+CRITICAL
+${PromptTemplates.MARKETPLACE_RULE}
+Preserve photographed product identity. Exactly 8.0 seconds. Four blocks only. No continuation after 8.0s.
+
+NEGATIVE PROMPT
+- no generic replacement product
+- no redesign or modernized look
+- no changed proportions or silhouette
+- no changed colors or materials
+- no duplicated product
+- no missing confirmed parts
+- no invented accessories or controls
+- no product morphing
+- no wrong left/right placement
+- no fake branding or random text
+- no marketplace UI or phone interface
+- no impossible mechanics
+- no malformed hands
+- no CGI/cartoon look
+
+TITLE
+Fishing Chair
+
+HASHTAGS
+#a #b #c #d #TikTokShop
+""".trimIndent()
+
+        val result = PromptCleanup.finalize(
+            rawPrompt = verbose,
+            voiceover = "OFF",
+            title = "Fishing Chair",
+            hashtags = listOf("#a", "#b", "#c", "#d", "#TikTokShop"),
+            voiceLanguage = "OFF",
+            marketplace = true,
+            tiktokShopMode = true
+        )
+
+        assertFalse(result.veoPrompt.contains("PRODUCT DESIGN = LOCKED"))
+        assertFalse(result.veoPrompt.contains("Do not reinterpret the product based on category knowledge"))
+        assertTrue(result.veoPrompt.contains("black tubular") || result.veoPrompt.contains("perforated upper backrest"))
+        assertTrue(result.veoPrompt.contains("0.0–2.0s"))
+        assertFalse(result.veoPrompt.contains("Timeline ends at 8.0s. Four blocks only. No extra scenes."))
+        val negLines = PromptCleanup.extractSection(result.veoPrompt, "NEGATIVE PROMPT")
+            .lineSequence().count { it.trim().startsWith("-") }
+        assertTrue("neg bullets=$negLines", negLines in 4..8)
+        assertTrue("still too long: ${result.veoPrompt.length} vs ${verbose.length}", result.veoPrompt.length < verbose.length)
     }
 }
 

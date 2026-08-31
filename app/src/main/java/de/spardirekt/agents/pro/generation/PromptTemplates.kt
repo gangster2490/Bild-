@@ -82,7 +82,9 @@ Return JSON only:
         """
 CURRENT STAGE: FINAL_PROMPT
 
-Generate the production-ready VEO 3.1 package.
+Generate the production-ready VEO 3.1 package for Gemini / VEO copy-paste.
+Keep every section SHORT and copy-ready. No essays. No repeated doctrine.
+
 Voice language: $voice
   DE: natural German ~12–18 spoken words
   RU: natural Russian ~14–22 spoken words
@@ -91,6 +93,20 @@ TikTok Shop Mode: ${if (tiktokShop) "ON" else "OFF"}
 ${lockedVoiceoverBlock(voice, lockedVoiceover)}
 Do not resend or invent unseen mechanisms.
 Do NOT include TIKTOK SHOP SAFETY AUDIT inside veoPrompt.
+
+SECTION LENGTH RULES (hard):
+FORMAT: one short line (9:16, photorealistic, exactly 8.0s)
+REFERENCES: 1–3 short sentences of what photos confirm
+PRODUCT LOCK: one short lock sentence + 5–12 product-specific details only (no long fidelity essay)
+SETTING: one short line
+SHOT SEQUENCE: exactly four timed lines (0.0–2.0 / 2.0–4.0 / 4.0–6.0 / 6.0–8.0). No meta paragraphs.
+ON-SCREEN TEXT: one short line
+VOICEOVER: spoken line or OFF
+AUDIO: one short line
+CRITICAL: one short line
+NEGATIVE PROMPT: 6–10 short bullets, product-specific when possible
+TITLE: one short title
+HASHTAGS: exactly 5
 
 Return JSON only:
 {
@@ -121,10 +137,11 @@ HASHTAGS",
 }
 
 veoPrompt must end at HASHTAGS. Nothing after HASHTAGS.
-Include fidelity core rules inside PRODUCT LOCK / CRITICAL.
 SHOT SEQUENCE must be exactly the four 8.0s blocks.
 HASHTAGS must be EXACTLY 5.
 The VOICEOVER section and json.voiceover must be identical.
+Do NOT paste long internal fidelity essays into PRODUCT LOCK or CRITICAL.
+Do NOT duplicate marketplace rules across sections.
 """.trimIndent()
     )
 
