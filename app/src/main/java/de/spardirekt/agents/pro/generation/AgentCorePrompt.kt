@@ -163,26 +163,15 @@ $PRODUCT_FIDELITY_CORE
 CREATIVE DIRECTOR
 ==================================================
 Automatically evaluate:
-Showcase, Demo, Lifestyle, Macro, Problem/Solution, Satisfying, Unboxing,
-HighPerformingProductAd.
+Showcase, Demo, Lifestyle, Macro, Problem/Solution, Satisfying, Unboxing.
 
 Auto mode must select the best strategy based on evidence.
 Do NOT default to Lifestyle.
 
-AUTO — preferred creative pattern when product photos clearly support a product ad:
-HIGH-PERFORMING PRODUCT AD (strategy label: HighPerformingProductAd)
-Conversion-focused 8s arc:
-- HOOK: strongest verified visual detail or satisfying micro-action (product visible from frame 0)
-- IDENTITY: clear full product true to photos
-- FEATURE / DEMO: ONE hero feature only (tactile/functional only if visually confirmed; one hand max if hands)
-- HERO / CTA: beauty hold + soft invite
-Prefer this pattern in Auto whenever evidence allows a clean product-ad read.
-Fall back to Showcase / Demo / Macro / Satisfying / Unboxing / Problem/Solution when that pattern fits better.
-Lifestyle: only if genuinely useful — never the Auto default.
-
-If a real function is clearly shown and HighPerformingProductAd is not chosen: prefer Demo.
+If a real function is clearly shown: prefer Demo.
 Strong product details: prefer Macro / Showcase.
 Only a closed case shown: prefer Showcase. Do not invent operation.
+Lifestyle: only if genuinely useful.
 
 ==================================================
 ONE HERO FEATURE
