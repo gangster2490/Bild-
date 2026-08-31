@@ -74,19 +74,17 @@ class ResultViewModel(app: Application) : AndroidViewModel(app) {
     fun observe(projectId: String): StateFlow<ProjectEntity?> =
         repo.observe(projectId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    fun hashtags(entity: ProjectEntity): List<String> = repo.parseHashtags(entity)
+    fun hashtags(entity: ProjectEntity): List<String> =
+        ResultComposition.hashtags(entity, repo.parseHashtags(entity))
 
-    fun fullPackage(entity: ProjectEntity): String {
-        val tags = hashtags(entity).joinToString(" ")
-        return buildString {
-            appendLine(entity.veoPrompt.trim())
-            appendLine()
-            appendLine("---")
-            appendLine("Озвучка: ${entity.voiceover.ifBlank { "OFF" }}")
-            appendLine("Название: ${entity.title}")
-            appendLine("Хештеги: $tags")
-        }.trim()
-    }
+    fun veoPrompt(entity: ProjectEntity): String = ResultComposition.veoPrompt(entity)
+
+    fun voiceover(entity: ProjectEntity): String = ResultComposition.voiceover(entity)
+
+    fun title(entity: ProjectEntity): String = ResultComposition.title(entity)
+
+    fun fullPackage(entity: ProjectEntity): String =
+        ResultComposition.fullPackage(entity, repo.parseHashtags(entity))
 }
 
 @Composable
@@ -125,13 +123,13 @@ fun ResultScreen(
                 onNewProject = onBackToCreate,
                 trailing = {
                     HeaderSquareButton(onClick = {
-                        entity?.let { shareText(context, it.veoPrompt) }
+                        entity?.let { shareText(context, viewModel.veoPrompt(it)) }
                     }) {
                         Icon(Icons.Outlined.Share, null, tint = VppColors.textLight, modifier = Modifier.size(18.dp))
                     }
                     Spacer(Modifier.width(8.dp))
                     HeaderSquareButton(onClick = {
-                        entity?.let { copyText(context, it.veoPrompt) }
+                        entity?.let { copyText(context, viewModel.veoPrompt(it)) }
                     }) {
                         Icon(Icons.Outlined.ContentCopy, null, tint = VppColors.textLight, modifier = Modifier.size(18.dp))
                     }
@@ -152,13 +150,17 @@ fun ResultScreen(
                     } else {
                         ResultBody(
                             entity = entity,
+                            veoPrompt = viewModel.veoPrompt(entity),
+                            voiceover = viewModel.voiceover(entity),
+                            title = viewModel.title(entity),
+                            voiceLabel = ResultComposition.voiceLabel(entity),
                             hashtags = viewModel.hashtags(entity),
-                            onCopyPrompt = { copyText(context, entity.veoPrompt) },
-                            onSharePrompt = { shareText(context, entity.veoPrompt) },
+                            onCopyPrompt = { copyText(context, viewModel.veoPrompt(entity)) },
+                            onSharePrompt = { shareText(context, viewModel.veoPrompt(entity)) },
                             onCopyPackage = { copyText(context, viewModel.fullPackage(entity)) },
                             onSharePackage = { shareText(context, viewModel.fullPackage(entity)) },
-                            onCopyVo = { copyText(context, entity.voiceover) },
-                            onCopyTitle = { copyText(context, entity.title) },
+                            onCopyVo = { copyText(context, viewModel.voiceover(entity)) },
+                            onCopyTitle = { copyText(context, viewModel.title(entity)) },
                             onCopyTags = { copyText(context, viewModel.hashtags(entity).joinToString(" ")) }
                         )
                     }
@@ -171,6 +173,10 @@ fun ResultScreen(
 @Composable
 private fun ResultBody(
     entity: ProjectEntity,
+    veoPrompt: String,
+    voiceover: String,
+    title: String,
+    voiceLabel: String,
     hashtags: List<String>,
     onCopyPrompt: () -> Unit,
     onSharePrompt: () -> Unit,
@@ -196,7 +202,7 @@ private fun ResultBody(
                 .padding(16.dp)
         ) {
             Text(
-                entity.veoPrompt.ifBlank { "Промпт ещё не готов." },
+                veoPrompt.ifBlank { "Промпт ещё не готов." },
                 style = type.body.copy(
                     color = VppColors.textLight.copy(alpha = 0.92f),
                     fontFamily = FontFamily.Monospace,
@@ -222,7 +228,7 @@ private fun ResultBody(
             Icon(Icons.Outlined.GraphicEq, null, tint = VppColors.accentPurple)
             Spacer(Modifier.width(10.dp))
             Text(
-                "Озвучка (${entity.voiceLanguage})",
+                voiceLabel,
                 style = type.cardTitle.copy(color = VppColors.textLight),
                 modifier = Modifier.weight(1f)
             )
@@ -232,7 +238,7 @@ private fun ResultBody(
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            entity.voiceover.ifBlank { "OFF" },
+            voiceover.ifBlank { "OFF" },
             style = type.body.copy(color = VppColors.textLight)
         )
     }
@@ -252,7 +258,7 @@ private fun ResultBody(
             }
         }
         Spacer(Modifier.height(8.dp))
-        Text(entity.title.ifBlank { "—" }, style = type.body.copy(color = VppColors.textLight))
+        Text(title.ifBlank { "—" }, style = type.body.copy(color = VppColors.textLight))
     }
 
     Spacer(Modifier.height(14.dp))
