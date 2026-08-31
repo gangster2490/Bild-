@@ -287,9 +287,12 @@ object PromptCleanup {
             map[name] = polishSectionBody(name, extractSection(text, name), marketplace)
         }
 
-        // Guarantee required non-blank defaults for critical structural sections.
+        // Guarantee required non-blank defaults for every structural section.
         if (map["FORMAT"].isNullOrBlank()) {
             map["FORMAT"] = "Vertical 9:16. Photorealistic TikTok Shop ad. Exactly 8.0s."
+        }
+        if (map["REFERENCES"].isNullOrBlank()) {
+            map["REFERENCES"] = "Uploaded product photos are the visual evidence."
         }
         if (map["SHOT SEQUENCE"].isNullOrBlank() || !hasFourBlocks(map["SHOT SEQUENCE"].orEmpty())) {
             map["SHOT SEQUENCE"] = CANONICAL_SHOT_SEQUENCE
@@ -297,7 +300,18 @@ object PromptCleanup {
         if (map["PRODUCT LOCK"].isNullOrBlank()) {
             map["PRODUCT LOCK"] = SHORT_PRODUCT_LOCK
         }
+        if (map["SETTING"].isNullOrBlank()) {
+            map["SETTING"] = "Uncluttered premium studio."
+        }
+        if (map["ON-SCREEN TEXT"].isNullOrBlank()) map["ON-SCREEN TEXT"] = "None."
         if (map["VOICEOVER"].isNullOrBlank()) map["VOICEOVER"] = "OFF"
+        if (map["AUDIO"].isNullOrBlank()) map["AUDIO"] = "Subtle music. Clear voice."
+        if (map["CRITICAL"].isNullOrBlank()) {
+            map["CRITICAL"] = "Keep product identity. Exactly 8.0s. Four blocks only."
+        }
+        if (map["NEGATIVE PROMPT"].isNullOrBlank()) {
+            map["NEGATIVE PROMPT"] = SHORT_NEGATIVE.joinToString("\n") { "- $it" }
+        }
         if (map["TITLE"].isNullOrBlank()) map["TITLE"] = "Product Ad"
         if (map["HASHTAGS"].isNullOrBlank()) {
             map["HASHTAGS"] = "#TikTokShop #ProductAd #MustSee #HomeFinds #ShopNow"
@@ -310,6 +324,17 @@ object PromptCleanup {
                     .joinToString(" ")
                     .trim()
             }
+        }
+
+        // Pad hashtag count to exactly 5 when present but short.
+        val tags = Regex("#[\\p{L}\\p{N}_]+")
+            .findAll(map["HASHTAGS"].orEmpty())
+            .map { it.value }
+            .distinct()
+            .toList()
+        if (tags.size != 5) {
+            map["HASHTAGS"] = ensureFiveHashtags(tags, map["TITLE"].orEmpty(), tiktokShopMode = true)
+                .joinToString(" ")
         }
 
         return REQUIRED_SECTIONS.joinToString("\n\n") { name ->
@@ -453,6 +478,8 @@ object PromptCleanup {
         REQUIRED_SECTIONS.forEach { section ->
             if (!Regex("""(?im)^$section\b""").containsMatchIn(prompt)) {
                 issues += "missing_$section"
+            } else if (extractSection(prompt, section).isBlank()) {
+                issues += "blank_$section"
             }
         }
         if (hashtags.size != 5) issues += "hashtag_count_${hashtags.size}"
@@ -483,6 +510,17 @@ object PromptCleanup {
             issues += "section_order_wrong"
         }
         return issues
+    }
+
+    /** True when local cleanup must still inject missing/blank tail sections. */
+    fun needsCompletenessRepair(prompt: String, hashtags: List<String>): Boolean {
+        return validateCompleteness(prompt, hashtags).any {
+            it.startsWith("missing_") ||
+                it.startsWith("blank_") ||
+                it == "incomplete_timeline" ||
+                it == "section_order_wrong" ||
+                it.startsWith("hashtag_count")
+        }
     }
 
     private fun simplifyFormat(raw: String): String {
@@ -895,6 +933,15 @@ object PromptCleanup {
         }
         if (map["REFERENCES"].isNullOrBlank()) {
             map["REFERENCES"] = "Uploaded product photos are the visual evidence."
+        }
+        if (map["VOICEOVER"].isNullOrBlank()) {
+            map["VOICEOVER"] = "OFF"
+        }
+        if (map["TITLE"].isNullOrBlank()) {
+            map["TITLE"] = "Product Ad"
+        }
+        if (map["HASHTAGS"].isNullOrBlank()) {
+            map["HASHTAGS"] = "#TikTokShop #ProductAd #MustSee #HomeFinds #ShopNow"
         }
         return REQUIRED_SECTIONS.joinToString("\n\n") { name ->
             "$name\n${map[name].orEmpty().trim()}"

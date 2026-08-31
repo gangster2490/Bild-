@@ -137,6 +137,9 @@ veoPrompt must end at HASHTAGS. Nothing after HASHTAGS.
 SHOT SEQUENCE must be exactly the four 8.0s blocks.
 HASHTAGS must be EXACTLY 5.
 The VOICEOVER section and json.voiceover must be identical.
+COMPLETENESS (hard): every required section MUST be present with a non-empty body —
+FORMAT, REFERENCES, PRODUCT LOCK, SETTING, SHOT SEQUENCE, ON-SCREEN TEXT, VOICEOVER, AUDIO, CRITICAL, NEGATIVE PROMPT, TITLE, HASHTAGS.
+Never truncate mid-section. Never omit the TITLE/HASHTAGS tail. If length is tight, shorten section bodies — do not drop sections.
 Do NOT paste long internal fidelity essays into PRODUCT LOCK or CRITICAL.
 Do NOT duplicate marketplace rules across sections.
 Do NOT include legacy sections: VISUAL FIDELITY, PRODUCT FIDELITY, SAFETY AUDIT, QUALITY GATE, CREATIVE DIRECTOR, PRODUCT MODEL, PRIMARY/MAIN REFERENCE.

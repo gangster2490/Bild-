@@ -237,17 +237,42 @@ class GenerationPipeline(
                 marketplace = marketplace,
                 tiktokShopMode = input.tiktokShopMode
             )
-            val completeness = PromptCleanup.validateCompleteness(cleaned.veoPrompt, cleaned.hashtags)
-            if (completeness.any { it.startsWith("missing_") }) {
-                // Local tail repair only — re-run finalize with injections already applied
-                DebugLog.d("Completeness issues: $completeness")
+            var completeness = PromptCleanup.validateCompleteness(cleaned.veoPrompt, cleaned.hashtags)
+            var repaired = cleaned
+            if (PromptCleanup.needsCompletenessRepair(cleaned.veoPrompt, cleaned.hashtags)) {
+                // Local tail repair only — never re-run photo analysis / creative director.
+                DebugLog.d("Completeness issues; local repair: $completeness")
+                repaired = PromptCleanup.finalize(
+                    rawPrompt = cleaned.veoPrompt.ifBlank { bundle.veoPrompt },
+                    voiceover = cleaned.voiceover.ifBlank { bundle.voiceover },
+                    title = cleaned.title.ifBlank { bundle.title },
+                    hashtags = cleaned.hashtags.ifEmpty { bundle.hashtags },
+                    voiceLanguage = input.voiceLanguage.name,
+                    marketplace = marketplace,
+                    tiktokShopMode = input.tiktokShopMode
+                )
+                completeness = PromptCleanup.validateCompleteness(repaired.veoPrompt, repaired.hashtags)
+                if (PromptCleanup.needsCompletenessRepair(repaired.veoPrompt, repaired.hashtags)) {
+                    // Last resort: rebuild from empty shell + known VO/title/tags.
+                    repaired = PromptCleanup.finalize(
+                        rawPrompt = "",
+                        voiceover = repaired.voiceover,
+                        title = repaired.title,
+                        hashtags = repaired.hashtags,
+                        voiceLanguage = input.voiceLanguage.name,
+                        marketplace = marketplace,
+                        tiktokShopMode = input.tiktokShopMode
+                    )
+                    completeness = PromptCleanup.validateCompleteness(repaired.veoPrompt, repaired.hashtags)
+                }
+                DebugLog.d("Completeness after local repair: $completeness")
             }
 
             val finalBundle = bundle.copy(
-                veoPrompt = cleaned.veoPrompt,
-                voiceover = cleaned.voiceover,
-                title = cleaned.title,
-                hashtags = cleaned.hashtags,
+                veoPrompt = repaired.veoPrompt,
+                voiceover = repaired.voiceover,
+                title = repaired.title,
+                hashtags = repaired.hashtags,
                 analysisJson = analysisJson,
                 productModelJson = productModelJson,
                 creativePlanJson = creativePlanJson,

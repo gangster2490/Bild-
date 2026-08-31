@@ -103,53 +103,72 @@ object JsonExtractor {
     /**
      * Salvage a VEO prompt body if JSON is still unusable.
      * Looks for FORMAT … HASHTAGS in the raw text (including inside broken JSON strings).
+     * If HASHTAGS is missing (truncated model output), salvages FORMAT … last available section
+     * so local cleanup can inject the missing tail.
      */
     fun salvageVeoPrompt(raw: String): String? {
         val text = stripFence(raw)
         val formatMatch = Regex("""(?i)(?:^|[\n\r"])\s*FORMAT\b""").find(text) ?: return null
         val start = text.indexOf("FORMAT", formatMatch.range.first, ignoreCase = true)
         if (start < 0) return null
-        val hashtags = Regex("""(?im)^HASHTAGS\b|(?i)(?:\n|\r|\\n)\s*HASHTAGS\b""").find(text, start) ?: return null
-        val hashtagsStart = text.indexOf("HASHTAGS", hashtags.range.first, ignoreCase = true)
-        val after = text.substring(hashtagsStart)
-        // End at closing JSON quote/brace/fence if present, else take hashtag lines.
-        val endRel = Regex("""(?m)^[}\`]|",\s*"|\\n"\s*[,}]""")
-            .find(after)
-            ?.range
-            ?.first
-            ?: run {
-                val lines = after.lines()
-                var last = 0
-                for (i in lines.indices) {
-                    val line = lines[i].trim()
-                    if (i == 0) {
-                        last = lines[i].length
-                        continue
+
+        val hashtags = Regex("""(?im)^HASHTAGS\b|(?i)(?:\n|\r|\\n)\s*HASHTAGS\b""").find(text, start)
+        val block = if (hashtags != null) {
+            val hashtagsStart = text.indexOf("HASHTAGS", hashtags.range.first, ignoreCase = true)
+            val after = text.substring(hashtagsStart)
+            // End at closing JSON quote/brace/fence if present, else take hashtag lines.
+            val endRel = Regex("""(?m)^[}\`]|",\s*"|\\n"\s*[,}]""")
+                .find(after)
+                ?.range
+                ?.first
+                ?: run {
+                    val lines = after.lines()
+                    var last = 0
+                    for (i in lines.indices) {
+                        val line = lines[i].trim()
+                        if (i == 0) {
+                            last = lines[i].length
+                            continue
+                        }
+                        if (line.isEmpty()) break
+                        if (line.startsWith("#") || line.contains("#")) {
+                            last += 1 + lines[i].length
+                        } else {
+                            break
+                        }
                     }
-                    if (line.isEmpty()) break
-                    if (line.startsWith("#") || line.contains("#")) {
-                        last += 1 + lines[i].length
-                    } else {
-                        break
-                    }
+                    last
                 }
-                last
-            }
-        var block = (text.substring(start, hashtagsStart) + after.substring(0, endRel)).trim()
-        block = block
+            text.substring(start, hashtagsStart) + after.substring(0, endRel)
+        } else {
+            // Truncated before HASHTAGS — take FORMAT through trailing JSON noise cut.
+            val tail = text.substring(start)
+            val cut = Regex("""(?m)^[}\`]|",\s*"|\\n"\s*[,}]""")
+                .find(tail)
+                ?.range
+                ?.first
+            if (cut != null) tail.substring(0, cut) else tail
+        }
+
+        var cleaned = block
             .replace("\\n", "\n")
             .replace("\\t", "\t")
             .replace("\\\"", "\"")
             .trim()
             .trimEnd('"', ',', '}', ' ')
             .trim()
-        if (!block.contains("PRODUCT LOCK", ignoreCase = true)) return null
-        if (!block.contains("SHOT SEQUENCE", ignoreCase = true)) return null
-        if (!Regex("""(?im)^FORMAT\b""").containsMatchIn(block) &&
-            !block.startsWith("FORMAT", ignoreCase = true)
+        if (!cleaned.contains("PRODUCT LOCK", ignoreCase = true)) return null
+        if (!cleaned.contains("SHOT SEQUENCE", ignoreCase = true)) return null
+        if (!Regex("""(?im)^FORMAT\b""").containsMatchIn(cleaned) &&
+            !cleaned.startsWith("FORMAT", ignoreCase = true)
         ) {
             return null
         }
-        return block
+        // Normalize leading FORMAT if it was glued to a quote.
+        if (!cleaned.startsWith("FORMAT", ignoreCase = true)) {
+            val idx = cleaned.indexOf("FORMAT", ignoreCase = true)
+            if (idx >= 0) cleaned = cleaned.substring(idx)
+        }
+        return cleaned
     }
 }

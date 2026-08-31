@@ -571,4 +571,104 @@ HASHTAGS
         assertFalse(cleaned.contains("Max 2"))
         assertFalse(cleaned.contains("No price"))
     }
+
+    @Test
+    fun finalize_completesTruncatedPromptMissingTail() {
+        val truncated = """
+FORMAT
+Vertical 9:16. Exactly 8.0s.
+
+REFERENCES
+Photos confirm black frame.
+
+PRODUCT LOCK
+Preserve black frame.
+
+SETTING
+Studio.
+
+SHOT SEQUENCE
+0.0–2.0s — HOOK: detail
+2.0–4.0s — IDENTITY: full
+4.0–6.0s — FEATURE / DEMO: fold
+6.0–8.0s — HERO / CTA: hold
+
+ON-SCREEN TEXT
+None.
+
+VOICEOVER
+OFF
+
+AUDIO
+Soft music.
+
+CRITICAL
+Keep identity.
+""".trimIndent()
+        // Missing NEGATIVE PROMPT, TITLE, HASHTAGS entirely
+        val result = PromptCleanup.finalize(
+            rawPrompt = truncated,
+            voiceover = "OFF",
+            title = "Black Frame Chair",
+            hashtags = emptyList(),
+            voiceLanguage = "OFF",
+            marketplace = false,
+            tiktokShopMode = true
+        )
+        val issues = PromptCleanup.validateCompleteness(result.veoPrompt, result.hashtags)
+        assertTrue("issues=$issues", issues.none { it.startsWith("missing_") })
+        assertTrue(issues.none { it == "section_order_wrong" })
+        assertTrue(issues.none { it == "incomplete_timeline" })
+        assertEquals(5, result.hashtags.size)
+        assertTrue(result.veoPrompt.contains("NEGATIVE PROMPT"))
+        assertTrue(result.veoPrompt.contains("TITLE"))
+        assertTrue(result.veoPrompt.contains("HASHTAGS"))
+        assertTrue(result.veoPrompt.trimEnd().contains("#"))
+    }
+
+    @Test
+    fun finalize_completesNearlyEmptyPrompt() {
+        val result = PromptCleanup.finalize(
+            rawPrompt = "FORMAT\n9:16",
+            voiceover = "Kompakt falten und mitnehmen.",
+            title = "Fold Chair",
+            hashtags = listOf("#a"),
+            voiceLanguage = "DE",
+            marketplace = true,
+            tiktokShopMode = true
+        )
+        val issues = PromptCleanup.validateCompleteness(result.veoPrompt, result.hashtags)
+        assertTrue(
+            "issues=$issues prompt=\n${result.veoPrompt}",
+            issues.none {
+                it.startsWith("missing_") ||
+                    it == "section_order_wrong" ||
+                    it == "incomplete_timeline" ||
+                    it.startsWith("hashtag_count")
+            }
+        )
+        assertEquals(5, result.hashtags.size)
+    }
+
+    @Test
+    fun salvage_partialPromptWithoutHashtags_thenFinalizeCompletes() {
+        val raw = """{"veoPrompt": "FORMAT\nVertical 9:16.\n\nREFERENCES\nphotos\n\nPRODUCT LOCK\nlock\n\nSETTING\nstudio\n\nSHOT SEQUENCE\n0.0–2.0s — HOOK\n2.0–4.0s — IDENTITY\n4.0–6.0s — FEATURE\n6.0–8.0s — HERO\n\nON-SCREEN TEXT\nNone\n\nVOICEOVER\nOFF\n\nAUDIO\nmusic\n\nCRITICAL\nlock\n\nNEGATIVE PROMPT\n- no redesign"}"""
+        val salvaged = JsonExtractor.salvageVeoPrompt(raw)
+        assertTrue("salvage should recover truncated FORMAT…NEGATIVE body", !salvaged.isNullOrBlank())
+        val bundle = FinalPromptJson.decode(raw)
+        val prompt = bundle.veoPrompt.ifBlank { salvaged.orEmpty() }
+        assertTrue(prompt.isNotBlank())
+        val result = PromptCleanup.finalize(
+            rawPrompt = prompt,
+            voiceover = "OFF",
+            title = "Product",
+            hashtags = emptyList(),
+            voiceLanguage = "OFF",
+            marketplace = false,
+            tiktokShopMode = true
+        )
+        val issues = PromptCleanup.validateCompleteness(result.veoPrompt, result.hashtags)
+        assertTrue("issues=$issues", issues.none { it.startsWith("missing_") })
+        assertEquals(5, result.hashtags.size)
+    }
 }
