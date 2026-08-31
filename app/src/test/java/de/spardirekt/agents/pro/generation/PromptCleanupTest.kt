@@ -237,18 +237,3 @@ HASHTAGS
         assertTrue("still too long: ${result.veoPrompt.length} vs ${verbose.length}", result.veoPrompt.length < verbose.length)
     }
 }
-
-class JsonExtractorTest {
-    @Test
-    fun stripsMarkdownFence() {
-        val raw = """
-```json
-{"title":"Pan","hashtags":["#a"]}
-```
-""".trimIndent()
-        val extracted = JsonExtractor.extract(raw)
-        assertTrue(extracted.startsWith("{"))
-        assertTrue(extracted.endsWith("}"))
-        assertFalse(extracted.contains("```"))
-    }
-}

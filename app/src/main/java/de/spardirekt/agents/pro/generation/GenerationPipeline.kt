@@ -12,12 +12,10 @@ import de.spardirekt.agents.pro.model.GenerationStage
 import de.spardirekt.agents.pro.model.ImageCategory
 import de.spardirekt.agents.pro.model.ProductModel
 import de.spardirekt.agents.pro.model.ProjectImage
-import de.spardirekt.agents.pro.model.QualityScores
 import de.spardirekt.agents.pro.model.VoiceLanguage
 import de.spardirekt.agents.pro.network.OpenAiClient
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -409,41 +407,12 @@ Remember: do not resend or rely on inventing unseen mechanisms.
         analysisJson: String,
         productModelJson: String,
         creativePlanJson: String
-    ): GenerationBundle {
-        val payload = JsonExtractor.extract(raw)
-        return runCatching {
-            val obj = json.parseToJsonElement(payload).jsonObject
-            val hashtags = obj["hashtags"]?.jsonArray?.mapNotNull {
-                it.jsonPrimitive.contentOrNull
-            }.orEmpty()
-            val scoresObj = obj["qualityScores"]?.jsonObject
-            val scores = QualityScores(
-                productFidelity = scoresObj?.get("productFidelity")?.jsonPrimitive?.intOrNull ?: 8,
-                creativity = scoresObj?.get("creativity")?.jsonPrimitive?.intOrNull ?: 8,
-                physicalPlausibility = scoresObj?.get("physicalPlausibility")?.jsonPrimitive?.intOrNull ?: 8,
-                voiceoverNaturalness = scoresObj?.get("voiceoverNaturalness")?.jsonPrimitive?.intOrNull ?: 8,
-                hookStrength = scoresObj?.get("hookStrength")?.jsonPrimitive?.intOrNull ?: 8
-            )
-            GenerationBundle(
-                veoPrompt = obj["veoPrompt"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                voiceover = obj["voiceover"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                title = obj["title"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                hashtags = hashtags,
-                productModelJson = productModelJson,
-                creativePlanJson = creativePlanJson,
-                analysisJson = analysisJson,
-                qualityScores = scores,
-                internalSafetyAudit = obj["internalSafetyAudit"]?.jsonPrimitive?.contentOrNull.orEmpty()
-            )
-        }.getOrElse {
-            GenerationBundle(
-                veoPrompt = raw,
-                analysisJson = analysisJson,
-                productModelJson = productModelJson,
-                creativePlanJson = creativePlanJson
-            )
-        }
-    }
+    ): GenerationBundle = FinalPromptJson.decode(
+        raw = raw,
+        analysisJson = analysisJson,
+        productModelJson = productModelJson,
+        creativePlanJson = creativePlanJson
+    )
 
     private fun applyClassifications(
         images: List<ProjectImage>,

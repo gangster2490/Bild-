@@ -78,8 +78,10 @@ Return JSON only:
         voice: String,
         tiktokShop: Boolean,
         lockedVoiceover: String? = null
-    ): String = AgentCorePrompt.withStage(
-        """
+    ): String {
+        val nl = "\\n" // teach the model escaped newlines, not raw breaks
+        return AgentCorePrompt.withStage(
+            """
 CURRENT STAGE: FINAL_PROMPT
 
 Generate the production-ready VEO 3.1 package for Gemini / VEO copy-paste.
@@ -108,22 +110,10 @@ NEGATIVE PROMPT: 6–10 short bullets, product-specific when possible
 TITLE: one short title
 HASHTAGS: exactly 5
 
-Return JSON only:
+Return JSON only. veoPrompt MUST be one JSON string. Use $nl for line breaks. Never put raw line breaks inside the JSON string.
 {
-  "veoPrompt": "full prompt with sections in exact order separated by blank lines:
-FORMAT
-REFERENCES
-PRODUCT LOCK
-SETTING
-SHOT SEQUENCE
-ON-SCREEN TEXT
-VOICEOVER
-AUDIO
-CRITICAL
-NEGATIVE PROMPT
-TITLE
-HASHTAGS",
-  "voiceover": "must equal the VOICEOVER section exactly",
+  "veoPrompt": "FORMAT${nl}Vertical 9:16. Photorealistic TikTok Shop product ad. Exactly 8.0 seconds.${nl}${nl}REFERENCES${nl}...${nl}${nl}PRODUCT LOCK${nl}...${nl}${nl}SETTING${nl}...${nl}${nl}SHOT SEQUENCE${nl}0.0–2.0s — HOOK: ...${nl}2.0–4.0s — IDENTITY: ...${nl}4.0–6.0s — FEATURE / DEMO: ...${nl}6.0–8.0s — HERO / CTA: ...${nl}${nl}ON-SCREEN TEXT${nl}...${nl}${nl}VOICEOVER${nl}...${nl}${nl}AUDIO${nl}...${nl}${nl}CRITICAL${nl}...${nl}${nl}NEGATIVE PROMPT${nl}- ...${nl}${nl}TITLE${nl}...${nl}${nl}HASHTAGS${nl}#a #b #c #d #TikTokShop",
+  "voiceover": "spoken line or OFF",
   "title": "...",
   "hashtags": ["#a","#b","#c","#d","#TikTokShop"],
   "qualityScores": {
@@ -143,7 +133,8 @@ The VOICEOVER section and json.voiceover must be identical.
 Do NOT paste long internal fidelity essays into PRODUCT LOCK or CRITICAL.
 Do NOT duplicate marketplace rules across sections.
 """.trimIndent()
-    )
+        )
+    }
 
     fun voiceoverSystem(voice: String, tiktokShop: Boolean): String =
         VoiceoverSystem.systemPrompt(voice, tiktokShop)
