@@ -15,11 +15,24 @@ object ResultComposition {
         "TITLE", "HASHTAGS"
     )
 
-    /** Clean VEO prompt for the prompt card and “Копировать VEO Prompt”. Ends at HASHTAGS. */
-    fun veoPrompt(entity: ProjectEntity): String {
+    /**
+     * Clean main VEO prompt for the prompt card and “Копировать VEO Prompt”.
+     * Rebuilds locally: salvages JSON blobs, strips essays / post-HASHTAGS junk,
+     * and syncs VOICEOVER / TITLE / HASHTAGS with the Result cards.
+     */
+    fun veoPrompt(entity: ProjectEntity, storedTags: List<String> = emptyList()): String {
         val raw = entity.veoPrompt.trim()
         if (raw.isBlank()) return ""
-        return stripAfterHashtags(raw).trim() + "\n"
+        val tags = hashtags(entity, storedTags)
+        val name = title(entity).let { if (it == "—") "" else it }
+        return PromptCleanup.composeCopiedPrompt(
+            rawPrompt = raw,
+            voiceover = voiceover(entity),
+            title = name,
+            hashtags = tags,
+            marketplace = marketplaceDetected(entity),
+            tiktokShopMode = entity.tiktokShopMode
+        )
     }
 
     fun voiceover(entity: ProjectEntity): String {
@@ -55,7 +68,7 @@ object ResultComposition {
      * Metadata comes FIRST so nothing is appended after HASHTAGS inside the VEO block.
      */
     fun fullPackage(entity: ProjectEntity, storedTags: List<String>): String {
-        val prompt = veoPrompt(entity).trim()
+        val prompt = veoPrompt(entity, storedTags).trim()
         val vo = voiceover(entity)
         val name = title(entity).let { if (it == "—") "" else it }
         val tags = hashtags(entity, storedTags).joinToString(" ")
@@ -70,6 +83,15 @@ object ResultComposition {
             append(prompt)
             if (!prompt.endsWith("\n")) append('\n')
         }.trim() + "\n"
+    }
+
+    fun marketplaceDetected(entity: ProjectEntity): Boolean {
+        val analysis = entity.analysisResultJson
+        val model = entity.productModelJson
+        return analysis.contains("\"marketplaceDetected\": true", ignoreCase = true) ||
+            analysis.contains("\"marketplaceDetected\":true", ignoreCase = true) ||
+            model.contains("\"hasMarketplaceScreenshots\": true", ignoreCase = true) ||
+            model.contains("\"hasMarketplaceScreenshots\":true", ignoreCase = true)
     }
 
     fun stripAfterHashtags(prompt: String): String {

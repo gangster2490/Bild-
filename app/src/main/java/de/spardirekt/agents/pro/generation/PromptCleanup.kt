@@ -112,6 +112,58 @@ object PromptCleanup {
     }
 
     /**
+     * Rebuild the Gemini/VEO copy body from a stored (possibly dirty) prompt.
+     * Syncs VOICEOVER / TITLE / HASHTAGS from the Result cards.
+     * Local only — does not call the model or change pipeline stages.
+     */
+    fun composeCopiedPrompt(
+        rawPrompt: String,
+        voiceover: String,
+        title: String,
+        hashtags: List<String>,
+        marketplace: Boolean,
+        tiktokShopMode: Boolean = true
+    ): String {
+        var prompt = rawPrompt.trim()
+        if (prompt.isBlank()) return ""
+
+        if (looksLikeRawJson(prompt)) {
+            prompt = JsonExtractor.salvageVeoPrompt(prompt).orEmpty()
+            if (prompt.isBlank()) return ""
+        }
+
+        prompt = stripAfterHashtags(prompt)
+        prompt = prompt.replace(Regex("(?is)\\n*TIKTOK SHOP SAFETY AUDIT[\\s\\S]*$"), "").trim()
+        prompt = dedupeParagraphs(prompt)
+        prompt = normalizePunctuation(prompt)
+        prompt = removeDuplicateVisualFidelity(prompt)
+        prompt = removeDuplicateMarketplaceRules(prompt)
+
+        val issues = mutableListOf<String>()
+        prompt = ensureSectionOrder(prompt, marketplace, issues)
+
+        val vo = voiceover.trim().ifBlank { extractSection(prompt, "VOICEOVER").ifBlank { "OFF" } }
+        prompt = replaceSection(prompt, "VOICEOVER", vo)
+
+        val cleanTitle = title.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+            .ifBlank { extractSection(prompt, "TITLE").lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty() }
+            .ifBlank { "Product Ad" }
+        prompt = replaceSection(prompt, "TITLE", cleanTitle)
+
+        var tags = normalizeHashtags(hashtags.ifEmpty { extractHashtags(prompt) })
+        tags = ensureFiveHashtags(tags, cleanTitle, tiktokShopMode)
+        prompt = replaceSection(prompt, "HASHTAGS", tags.joinToString(" "))
+
+        prompt = simplifyCopiedPrompt(prompt, marketplace)
+        return stripAfterHashtags(prompt).trim() + "\n"
+    }
+
+    private fun looksLikeRawJson(text: String): Boolean {
+        val t = text.trim()
+        return t.startsWith("{") && t.contains("\"veoPrompt\"")
+    }
+
+    /**
      * Deterministic local pass that shortens only the prompt the owner copies into Gemini/VEO.
      * Does not change photo analysis or other pipeline stages.
      */
@@ -194,17 +246,13 @@ object PromptCleanup {
             .lineSequence()
             .map { it.trim() }
             .filter { it.isNotBlank() }
+            .filterNot { line -> isGenericFidelityBoilerplate(line) }
             .filterNot { line ->
-                line.contains("CORE PRINCIPLE", ignoreCase = true) ||
-                    line.contains("CREATIVE PRESENTATION", ignoreCase = true) ||
-                    line.contains("strict visual references", ignoreCase = true) ||
-                    line.contains("Do not reinterpret", ignoreCase = true) ||
-                    line.contains("Do not replace the photographed", ignoreCase = true) ||
-                    line.contains("Do not redesign, modernize", ignoreCase = true) ||
-                    line.contains("If creative instructions conflict", ignoreCase = true) ||
-                    line.contains("generated product must remain", ignoreCase = true)
+                // Drop lines that merely restate the short lock
+                line.contains("Match the uploaded product photos exactly", ignoreCase = true)
             }
-            .take(8)
+            .distinctBy { it.lowercase() }
+            .take(12)
             .toList()
         return buildString {
             append(SHORT_PRODUCT_LOCK)
@@ -213,6 +261,21 @@ object PromptCleanup {
                 append(specifics.joinToString("\n"))
             }
         }.trim()
+    }
+
+    private fun isGenericFidelityBoilerplate(line: String): Boolean {
+        val l = line.lowercase()
+        return l.contains("core principle") ||
+            l.contains("creative presentation") ||
+            l.contains("product design = locked") ||
+            l.contains("strict visual references") ||
+            l.contains("do not reinterpret") ||
+            l.contains("do not replace the photographed") ||
+            l.contains("do not redesign, modernize") ||
+            l.contains("if creative instructions conflict") ||
+            l.contains("generated product must remain") ||
+            l.contains("preserve the exact overall silhouette") ||
+            l.contains("proportions, construction, colors, materials, controls, handles, hinges")
     }
 
     private fun simplifyShotSequence(raw: String): String {
@@ -254,6 +317,14 @@ object PromptCleanup {
         var out = text
         out = out.replace(
             Regex("(?is)Use the uploaded product photos as strict visual references[\\s\\S]{0,800}?PRODUCT DESIGN = LOCKED\\.?"),
+            ""
+        )
+        out = out.replace(
+            Regex("(?is)The generated product must remain the same physical product shown in the uploaded photos\\.?"),
+            ""
+        )
+        out = out.replace(
+            Regex("(?is)Preserve the exact overall silhouette, proportions, construction, colors, materials, controls, handles, hinges, accessories, markings and distinctive visual details\\.?"),
             ""
         )
         out = out.replace(

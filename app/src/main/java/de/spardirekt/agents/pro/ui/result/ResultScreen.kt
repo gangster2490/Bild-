@@ -77,7 +77,8 @@ class ResultViewModel(app: Application) : AndroidViewModel(app) {
     fun hashtags(entity: ProjectEntity): List<String> =
         ResultComposition.hashtags(entity, repo.parseHashtags(entity))
 
-    fun veoPrompt(entity: ProjectEntity): String = ResultComposition.veoPrompt(entity)
+    fun veoPrompt(entity: ProjectEntity): String =
+        ResultComposition.veoPrompt(entity, repo.parseHashtags(entity))
 
     fun voiceover(entity: ProjectEntity): String = ResultComposition.voiceover(entity)
 

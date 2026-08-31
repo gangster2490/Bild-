@@ -228,6 +228,7 @@ HASHTAGS
 
         assertFalse(result.veoPrompt.contains("PRODUCT DESIGN = LOCKED"))
         assertFalse(result.veoPrompt.contains("Do not reinterpret the product based on category knowledge"))
+        assertFalse(result.veoPrompt.contains("Preserve the exact overall silhouette"))
         assertTrue(result.veoPrompt.contains("black tubular") || result.veoPrompt.contains("perforated upper backrest"))
         assertTrue(result.veoPrompt.contains("0.0–2.0s"))
         assertFalse(result.veoPrompt.contains("Timeline ends at 8.0s. Four blocks only. No extra scenes."))
@@ -235,5 +236,67 @@ HASHTAGS
             .lineSequence().count { it.trim().startsWith("-") }
         assertTrue("neg bullets=$negLines", negLines in 4..8)
         assertTrue("still too long: ${result.veoPrompt.length} vs ${verbose.length}", result.veoPrompt.length < verbose.length)
+    }
+
+    @Test
+    fun composeCopiedPrompt_syncsCardFields_andStripsEssay() {
+        val raw = """
+FORMAT
+Vertical 9:16. Exactly 8.0 seconds.
+
+REFERENCES
+Photos confirm black frame.
+
+PRODUCT LOCK
+${PromptTemplates.PRODUCT_FIDELITY_CORE}
+Preserve black tubular frame and red tray.
+
+SETTING
+Studio
+
+SHOT SEQUENCE
+0.0–2.0s — HOOK: tray
+2.0–4.0s — IDENTITY: full
+4.0–6.0s — FEATURE / DEMO: fold
+6.0–8.0s — HERO / CTA: hold
+
+ON-SCREEN TEXT
+Fold
+
+VOICEOVER
+Закажите.
+
+AUDIO
+Music
+
+CRITICAL
+Lock
+
+NEGATIVE PROMPT
+- no redesign
+
+TITLE
+Old
+
+HASHTAGS
+#x
+""".trimIndent()
+        val composed = PromptCleanup.composeCopiedPrompt(
+            rawPrompt = raw,
+            voiceover = "Загляни в TikTok Shop.",
+            title = "Fishing Chair",
+            hashtags = listOf("#a", "#b", "#c", "#d", "#TikTokShop"),
+            marketplace = true,
+            tiktokShopMode = true
+        )
+        assertEquals(
+            "Загляни в TikTok Shop.",
+            PromptCleanup.extractSection(composed, "VOICEOVER").trim()
+        )
+        assertEquals("Fishing Chair", PromptCleanup.extractSection(composed, "TITLE").trim())
+        assertTrue(PromptCleanup.extractSection(composed, "HASHTAGS").contains("#TikTokShop"))
+        assertFalse(composed.contains("PRODUCT DESIGN = LOCKED"))
+        assertFalse(composed.contains("Preserve the exact overall silhouette"))
+        assertTrue(composed.contains("black tubular") || composed.contains("red tray"))
     }
 }

@@ -102,19 +102,54 @@ object JsonExtractor {
 
     /**
      * Salvage a VEO prompt body if JSON is still unusable.
-     * Looks for FORMAT … HASHTAGS in the raw text.
+     * Looks for FORMAT … HASHTAGS in the raw text (including inside broken JSON strings).
      */
     fun salvageVeoPrompt(raw: String): String? {
         val text = stripFence(raw)
-        val start = Regex("""(?im)^FORMAT\b""").find(text)?.range?.first ?: return null
-        val hashtags = Regex("""(?im)^HASHTAGS\b""").find(text, start) ?: return null
-        val after = text.substring(hashtags.range.first)
-        val endRel = after.indexOfAny(charArrayOf('{', '`'))
-            .takeIf { it > 0 }
-            ?: after.length
-        val block = (text.substring(start, hashtags.range.first) + after.substring(0, endRel)).trim()
+        val formatMatch = Regex("""(?i)(?:^|[\n\r"])\s*FORMAT\b""").find(text) ?: return null
+        val start = text.indexOf("FORMAT", formatMatch.range.first, ignoreCase = true)
+        if (start < 0) return null
+        val hashtags = Regex("""(?im)^HASHTAGS\b|(?i)(?:\n|\r|\\n)\s*HASHTAGS\b""").find(text, start) ?: return null
+        val hashtagsStart = text.indexOf("HASHTAGS", hashtags.range.first, ignoreCase = true)
+        val after = text.substring(hashtagsStart)
+        // End at closing JSON quote/brace/fence if present, else take hashtag lines.
+        val endRel = Regex("""(?m)^[}\`]|",\s*"|\\n"\s*[,}]""")
+            .find(after)
+            ?.range
+            ?.first
+            ?: run {
+                val lines = after.lines()
+                var last = 0
+                for (i in lines.indices) {
+                    val line = lines[i].trim()
+                    if (i == 0) {
+                        last = lines[i].length
+                        continue
+                    }
+                    if (line.isEmpty()) break
+                    if (line.startsWith("#") || line.contains("#")) {
+                        last += 1 + lines[i].length
+                    } else {
+                        break
+                    }
+                }
+                last
+            }
+        var block = (text.substring(start, hashtagsStart) + after.substring(0, endRel)).trim()
+        block = block
+            .replace("\\n", "\n")
+            .replace("\\t", "\t")
+            .replace("\\\"", "\"")
+            .trim()
+            .trimEnd('"', ',', '}', ' ')
+            .trim()
         if (!block.contains("PRODUCT LOCK", ignoreCase = true)) return null
         if (!block.contains("SHOT SEQUENCE", ignoreCase = true)) return null
+        if (!Regex("""(?im)^FORMAT\b""").containsMatchIn(block) &&
+            !block.startsWith("FORMAT", ignoreCase = true)
+        ) {
+            return null
+        }
         return block
     }
 }

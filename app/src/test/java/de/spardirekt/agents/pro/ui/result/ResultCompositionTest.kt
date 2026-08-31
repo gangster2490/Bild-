@@ -1,6 +1,7 @@
 package de.spardirekt.agents.pro.ui.result
 
 import de.spardirekt.agents.pro.data.db.ProjectEntity
+import de.spardirekt.agents.pro.generation.PromptTemplates
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -31,7 +32,7 @@ ON-SCREEN TEXT
 Fold
 
 VOICEOVER
-Загляни в TikTok Shop.
+Закажите в TikTok Shop.
 
 AUDIO
 Soft music
@@ -43,17 +44,19 @@ NEGATIVE PROMPT
 - no generic chair
 
 TITLE
-Fishing Chair
+Old Title
 
 HASHTAGS
-#a #b #c #d #TikTokShop
+#old #tags
 """.trimIndent()
 
     private fun entity(
         prompt: String = cleanPrompt,
         voiceover: String = "Загляни в TikTok Shop.",
         title: String = "Fishing Chair",
-        voice: String = "RU"
+        voice: String = "RU",
+        analysisJson: String = "",
+        hashtagsJson: String = """["#a","#b","#c","#d","#TikTokShop"]"""
     ) = ProjectEntity(
         id = "p1",
         createdAt = 1L,
@@ -62,7 +65,8 @@ HASHTAGS
         veoPrompt = prompt,
         voiceover = voiceover,
         title = title,
-        hashtagsJson = """["#a","#b","#c","#d","#TikTokShop"]"""
+        hashtagsJson = hashtagsJson,
+        analysisResultJson = analysisJson
     )
 
     @Test
@@ -73,6 +77,131 @@ HASHTAGS
         assertTrue(ResultComposition.nothingAfterHashtags(composed))
         assertFalse(composed.contains("TIKTOK SHOP SAFETY AUDIT"))
         assertFalse(composed.contains("Озвучка: leak"))
+    }
+
+    @Test
+    fun mainPromptSyncsVoiceoverTitleHashtagsFromCards() {
+        val composed = ResultComposition.veoPrompt(
+            entity(
+                voiceover = "Загляни в TikTok Shop.",
+                title = "Fishing Chair",
+            ),
+            listOf("#a", "#b", "#c", "#d", "#TikTokShop")
+        )
+        val vo = PromptCleanupSection(composed, "VOICEOVER")
+        val title = PromptCleanupSection(composed, "TITLE")
+        val tags = PromptCleanupSection(composed, "HASHTAGS")
+        assertEquals("Загляни в TikTok Shop.", vo)
+        assertEquals("Fishing Chair", title)
+        assertTrue(tags.contains("#TikTokShop"))
+        assertFalse(composed.contains("Закажите в TikTok Shop."))
+        assertFalse(composed.contains("Old Title"))
+    }
+
+    @Test
+    fun mainPromptStripsFidelityEssay_keepsProductDetails() {
+        val verbose = """
+FORMAT
+Vertical 9:16. Photorealistic. Exactly 8.0 seconds.
+
+REFERENCES
+Photos confirm black tubular frame.
+
+PRODUCT LOCK
+${PromptTemplates.PRODUCT_FIDELITY_CORE}
+
+Preserve black tubular X-braced frame, perforated upper backrest, red circular right-front tray.
+
+SETTING
+Studio
+
+SHOT SEQUENCE
+0.0–2.0s — HOOK: red tray detail
+2.0–4.0s — IDENTITY: full chair
+4.0–6.0s — FEATURE / DEMO: fold action
+6.0–8.0s — HERO / CTA: hero hold
+
+ON-SCREEN TEXT
+Compact fold
+
+VOICEOVER
+OFF
+
+AUDIO
+Soft music
+
+CRITICAL
+Keep identity. Exactly 8.0s.
+
+NEGATIVE PROMPT
+- no generic chair
+- no redesign
+
+TITLE
+Fishing Chair
+
+HASHTAGS
+#a #b #c #d #TikTokShop
+""".trimIndent()
+        val composed = ResultComposition.veoPrompt(entity(prompt = verbose, voiceover = "OFF", title = "Fishing Chair"))
+        assertFalse(composed.contains("PRODUCT DESIGN = LOCKED"))
+        assertFalse(composed.contains("Preserve the exact overall silhouette"))
+        assertTrue(composed.contains("black tubular") || composed.contains("perforated upper backrest"))
+        assertTrue(composed.contains("0.0–2.0s — HOOK: red tray detail") || composed.contains("red tray"))
+        assertTrue(ResultComposition.hasRequiredSectionHeaders(composed))
+        assertTrue(ResultComposition.nothingAfterHashtags(composed))
+    }
+
+    @Test
+    fun mainPromptSalvagesRawJsonBlob() {
+        val jsonBlob = """
+{"veoPrompt": "FORMAT
+Vertical 9:16. Exactly 8.0 seconds.
+
+REFERENCES
+Photos confirm frame.
+
+PRODUCT LOCK
+Preserve black tubular frame.
+
+SETTING
+Studio
+
+SHOT SEQUENCE
+0.0–2.0s — HOOK
+2.0–4.0s — IDENTITY
+4.0–6.0s — FEATURE / DEMO
+6.0–8.0s — HERO / CTA
+
+ON-SCREEN TEXT
+Fold
+
+VOICEOVER
+OFF
+
+AUDIO
+Music
+
+CRITICAL
+Lock
+
+NEGATIVE PROMPT
+- no redesign
+
+TITLE
+Chair
+
+HASHTAGS
+#a #b #c #d #TikTokShop", "voiceover":"OFF","title":"Chair"}
+""".trimIndent()
+        val composed = ResultComposition.veoPrompt(
+            entity(prompt = jsonBlob, voiceover = "OFF", title = "Chair"),
+            listOf("#a", "#b", "#c", "#d", "#TikTokShop")
+        )
+        assertTrue(composed.startsWith("FORMAT"))
+        assertFalse(composed.trimStart().startsWith("{"))
+        assertTrue(composed.contains("PRODUCT LOCK"))
+        assertTrue(ResultComposition.nothingAfterHashtags(composed))
     }
 
     @Test
@@ -96,11 +225,10 @@ HASHTAGS
     @Test
     fun cardsFallBackToPromptSectionsWhenFieldsBlank() {
         val e = entity(voiceover = "", title = "")
-        assertEquals("Загляни в TikTok Shop.", ResultComposition.voiceover(e))
-        assertEquals("Fishing Chair", ResultComposition.title(e))
+        assertEquals("Закажите в TikTok Shop.", ResultComposition.voiceover(e))
+        assertEquals("Old Title", ResultComposition.title(e))
         val tags = ResultComposition.hashtags(e, emptyList())
-        assertEquals(5, tags.size)
-        assertTrue(tags.any { it.equals("#TikTokShop", true) })
+        assertEquals(2, tags.size)
     }
 
     @Test
@@ -108,4 +236,7 @@ HASHTAGS
         assertEquals("Озвучка (DE)", ResultComposition.voiceLabel(entity(voice = "DE")))
         assertEquals("Озвучка (RU)", ResultComposition.voiceLabel(entity(voice = "RU")))
     }
+
+    private fun PromptCleanupSection(prompt: String, section: String): String =
+        de.spardirekt.agents.pro.generation.PromptCleanup.extractSection(prompt, section).trim()
 }
