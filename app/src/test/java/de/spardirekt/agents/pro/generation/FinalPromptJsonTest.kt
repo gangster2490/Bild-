@@ -191,6 +191,27 @@ trailing junk { "veoPrompt":
             Regex(""""veoPrompt"\s*:\s*"[^"\\]*\n""").containsMatchIn(prompt)
         )
     }
+
+    @Test
+    fun prefersMainPromptAliasWhenVeoPromptMissing() {
+        val body = validPrompt
+        val escaped = body.replace("\n", "\\n")
+        val raw = "{\"mainPrompt\":\"$escaped\",\"voiceover\":\"OFF\",\"title\":\"Fishing Chair\",\"hashtags\":[\"#a\",\"#b\",\"#c\",\"#d\",\"#TikTokShop\"]}"
+        val bundle = FinalPromptJson.decode(raw)
+        assertTrue(bundle.veoPrompt.startsWith("FORMAT"))
+        assertTrue(bundle.veoPrompt.contains("PRODUCT LOCK"))
+        assertFalse(bundle.veoPrompt.trim().startsWith("{"))
+    }
+
+    @Test
+    fun prefersFormattedBodyOverJsonBlobWhenBothAliasesPresent() {
+        val body = validPrompt
+        val escaped = body.replace("\n", "\\n")
+        val raw = "{\"veoPrompt\":\"{ \\\"nested\\\": true }\",\"mainPrompt\":\"$escaped\",\"title\":\"Fishing Chair\"}"
+        val bundle = FinalPromptJson.decode(raw)
+        assertTrue(bundle.veoPrompt.startsWith("FORMAT"))
+        assertTrue(bundle.veoPrompt.contains("HASHTAGS"))
+    }
 }
 
 class JsonExtractorRepairTest {

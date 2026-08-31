@@ -67,12 +67,36 @@ import de.spardirekt.agents.pro.ui.theme.VppShapes
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 class ResultViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = VeoPromptProApp.instance.projectRepository
 
     fun observe(projectId: String): StateFlow<ProjectEntity?> =
         repo.observe(projectId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    /**
+     * Rewrite any legacy/raw stored mainPrompt blob to the current cleaned
+     * Gemini/VEO composition so runtime Result always matches cleanup rules.
+     */
+    fun ensureCleanStoredPrompt(projectId: String) {
+        viewModelScope.launch {
+            val entity = repo.get(projectId) ?: return@launch
+            if (entity.status != de.spardirekt.agents.pro.model.ProjectStatus.Ready.name) return@launch
+            val tags = repo.parseHashtags(entity)
+            if (!ResultComposition.needsStoreRewrite(entity, tags)) return@launch
+            val cleaned = ResultComposition.veoPrompt(entity, tags)
+            if (cleaned.isBlank()) return@launch
+            repo.save(
+                entity.copy(
+                    veoPrompt = cleaned,
+                    voiceover = ResultComposition.voiceover(entity),
+                    title = ResultComposition.title(entity).let { if (it == "—") entity.title else it },
+                    hashtagsJson = repo.encodeHashtags(ResultComposition.hashtags(entity, tags))
+                )
+            )
+        }
+    }
 
     fun hashtags(entity: ProjectEntity): List<String> =
         ResultComposition.hashtags(entity, repo.parseHashtags(entity))
@@ -101,6 +125,7 @@ fun ResultScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
+    LaunchedEffect(projectId) { viewModel.ensureCleanStoredPrompt(projectId) }
 
     val entity = project
     Box(

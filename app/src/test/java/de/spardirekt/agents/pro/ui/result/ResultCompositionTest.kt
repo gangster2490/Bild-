@@ -237,6 +237,60 @@ HASHTAGS
         assertEquals("Озвучка (RU)", ResultComposition.voiceLabel(entity(voice = "RU")))
     }
 
+    @Test
+    fun needsStoreRewrite_whenLegacyDoctrineStillStored() {
+        val legacy = """
+FORMAT
+Vertical 9:16.
+
+VISUAL FIDELITY
+PRODUCT DESIGN = LOCKED.
+
+REFERENCES
+Photos confirm frame.
+
+PRODUCT LOCK
+${de.spardirekt.agents.pro.generation.PromptTemplates.PRODUCT_FIDELITY_CORE}
+black tubular frame
+
+SETTING
+Studio
+
+SHOT SEQUENCE
+0.0–2.0s — HOOK
+2.0–4.0s — IDENTITY
+4.0–6.0s — FEATURE / DEMO
+6.0–8.0s — HERO / CTA
+
+ON-SCREEN TEXT
+Fold
+
+VOICEOVER
+OFF
+
+AUDIO
+Music
+
+CRITICAL
+Lock
+
+NEGATIVE PROMPT
+- no redesign
+
+TITLE
+Chair
+
+HASHTAGS
+#a #b #c #d #TikTokShop
+""".trimIndent()
+        val e = entity(prompt = legacy, voiceover = "OFF", title = "Chair")
+        assertTrue(ResultComposition.needsStoreRewrite(e, listOf("#a", "#b", "#c", "#d", "#TikTokShop")))
+        val cleaned = ResultComposition.veoPrompt(e, listOf("#a", "#b", "#c", "#d", "#TikTokShop"))
+        assertFalse(cleaned.contains("VISUAL FIDELITY"))
+        assertFalse(cleaned.contains("PRODUCT DESIGN = LOCKED"))
+        assertTrue(cleaned.startsWith("FORMAT"))
+    }
+
     private fun PromptCleanupSection(prompt: String, section: String): String =
         de.spardirekt.agents.pro.generation.PromptCleanup.extractSection(prompt, section).trim()
 }

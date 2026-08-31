@@ -214,7 +214,11 @@ object PromptCleanup {
 
     private fun looksLikeRawJson(text: String): Boolean {
         val t = text.trim()
-        return t.startsWith("{") && t.contains("\"veoPrompt\"")
+        return t.startsWith("{") && (
+            t.contains("\"veoPrompt\"") ||
+                t.contains("\"mainPrompt\"") ||
+                t.contains("\"finalPrompt\"")
+            )
     }
 
     /**

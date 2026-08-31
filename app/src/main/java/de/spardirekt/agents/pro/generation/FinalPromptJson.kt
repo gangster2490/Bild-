@@ -111,17 +111,34 @@ object FinalPromptJson {
     }
 
     private fun readVeoPromptField(obj: JsonObject): String {
-        obj["veoPrompt"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }?.let {
-            return it
-        }
+        val candidates = listOf("veoPrompt", "mainPrompt", "finalPrompt", "prompt", "geminiPrompt")
+            .mapNotNull { key ->
+                obj[key]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+            }
+        // Prefer a candidate that already looks like the 12-section VEO body.
+        candidates.firstOrNull { looksLikeVeoBody(it) }?.let { return it }
+        candidates.firstOrNull()?.let { return it }
+
         runCatching {
             val lines = obj["veoPrompt"]?.jsonArray?.mapNotNull { el ->
                 el.jsonPrimitive.contentOrNull
                     ?: el.jsonObject.values.firstOrNull()?.jsonPrimitive?.contentOrNull
             }.orEmpty()
+            if (lines.isNotEmpty()) {
+                val joined = lines.joinToString("\n").trim()
+                if (joined.isNotEmpty()) return joined
+            }
+        }
+        // Legacy: model sometimes returns mainPrompt as array / sections object
+        runCatching {
+            val lines = obj["mainPrompt"]?.jsonArray?.mapNotNull { el ->
+                el.jsonPrimitive.contentOrNull
+            }.orEmpty()
             if (lines.isNotEmpty()) return lines.joinToString("\n").trim()
         }
-        val sections = obj["veoSections"]?.jsonObject ?: return ""
+        val sections = obj["veoSections"]?.jsonObject
+            ?: obj["mainPromptSections"]?.jsonObject
+            ?: return ""
         val joined = sectionOrder.joinToString("\n\n") { name ->
             val body = sections[name]?.jsonPrimitive?.contentOrNull
                 ?: sections[name.replace(" ", "_")]?.jsonPrimitive?.contentOrNull
@@ -131,8 +148,20 @@ object FinalPromptJson {
         return if (joined.contains("FORMAT")) joined + "\n" else ""
     }
 
+    private fun looksLikeVeoBody(text: String): Boolean {
+        val t = text.trim()
+        if (t.startsWith("{")) return false
+        return Regex("""(?im)^FORMAT\b""").containsMatchIn(t) &&
+            Regex("""(?im)^PRODUCT LOCK\b""").containsMatchIn(t) &&
+            Regex("""(?im)^HASHTAGS\b""").containsMatchIn(t)
+    }
+
     private fun looksLikeRawJson(text: String): Boolean {
         val t = text.trim()
-        return t.startsWith("{") && t.contains("\"veoPrompt\"")
+        return t.startsWith("{") && (
+            t.contains("\"veoPrompt\"") ||
+                t.contains("\"mainPrompt\"") ||
+                t.contains("\"finalPrompt\"")
+            )
     }
 }

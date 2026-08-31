@@ -284,11 +284,28 @@ class GenerationManager(
                     ?: p.productModelJson,
                 creativePlanJson = update.creativePlan?.let { json.encodeToString(it) }
                     ?: p.creativePlanJson,
-                veoPrompt = update.bundle?.veoPrompt?.ifBlank { p.veoPrompt } ?: p.veoPrompt,
-                voiceover = update.bundle?.voiceover?.ifBlank { p.voiceover } ?: p.voiceover,
-                title = update.bundle?.title?.ifBlank { p.title } ?: p.title,
-                hashtagsJson = update.bundle?.hashtags?.let { repository.encodeHashtags(it) }
-                    ?: p.hashtagsJson,
+                // Never persist the raw model draft. Only DONE carries the cleaned
+                // Gemini/VEO prompt from PromptCleanup.finalize.
+                veoPrompt = if (update.stage == GenerationStage.DONE) {
+                    update.bundle?.veoPrompt?.ifBlank { p.veoPrompt } ?: p.veoPrompt
+                } else {
+                    p.veoPrompt
+                },
+                voiceover = if (update.stage == GenerationStage.DONE) {
+                    update.bundle?.voiceover?.ifBlank { p.voiceover } ?: p.voiceover
+                } else {
+                    p.voiceover
+                },
+                title = if (update.stage == GenerationStage.DONE) {
+                    update.bundle?.title?.ifBlank { p.title } ?: p.title
+                } else {
+                    p.title
+                },
+                hashtagsJson = if (update.stage == GenerationStage.DONE) {
+                    update.bundle?.hashtags?.let { repository.encodeHashtags(it) } ?: p.hashtagsJson
+                } else {
+                    p.hashtagsJson
+                },
                 imageUrisJson = imagesJson,
                 completedStagesJson = repository.encodeCompletedStages(completed),
                 thumbnailUri = repository.parseImages(p.copy(imageUrisJson = imagesJson))

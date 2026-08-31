@@ -5,7 +5,8 @@ import de.spardirekt.agents.pro.generation.PromptCleanup
 
 /**
  * Composes what the Result screen shows and copies.
- * Does not change the generation pipeline — only presentation of stored fields.
+ * Always rebuilds the Gemini/VEO body through PromptCleanup — never trusts
+ * a raw/legacy stored mainPrompt blob as display text.
  */
 object ResultComposition {
 
@@ -17,15 +18,14 @@ object ResultComposition {
 
     /**
      * Clean main VEO prompt for the prompt card and “Копировать VEO Prompt”.
-     * Rebuilds locally: salvages JSON blobs, strips essays / post-HASHTAGS junk,
-     * and syncs VOICEOVER / TITLE / HASHTAGS with the Result cards.
+     * Always runs the current local cleanup (legacy strip + final shape lock).
      */
     fun veoPrompt(entity: ProjectEntity, storedTags: List<String> = emptyList()): String {
         val raw = entity.veoPrompt.trim()
         if (raw.isBlank()) return ""
         val tags = hashtags(entity, storedTags)
         val name = title(entity).let { if (it == "—") "" else it }
-        return PromptCleanup.composeCopiedPrompt(
+        val composed = PromptCleanup.composeCopiedPrompt(
             rawPrompt = raw,
             voiceover = voiceover(entity),
             title = name,
@@ -33,6 +33,29 @@ object ResultComposition {
             marketplace = marketplaceDetected(entity),
             tiktokShopMode = entity.tiktokShopMode
         )
+        // Belt-and-suspenders: lock exact 12-section shape even if compose path changes.
+        return PromptCleanup.finalCleanupCopiedPrompt(
+            composed,
+            marketplace = marketplaceDetected(entity)
+        )
+    }
+
+    /** True when stored DB text is not already the cleaned Gemini copy. */
+    fun needsStoreRewrite(entity: ProjectEntity, storedTags: List<String>): Boolean {
+        val raw = entity.veoPrompt.trim()
+        if (raw.isBlank()) return false
+        val cleaned = veoPrompt(entity, storedTags)
+        if (cleaned.isBlank()) return false
+        if (raw != cleaned.trimEnd() + "\n" && raw != cleaned.trimEnd() && raw != cleaned) {
+            return true
+        }
+        return PromptCleanup.validateCompleteness(raw, hashtags(entity, storedTags))
+            .any {
+                it.startsWith("legacy_section_") ||
+                    it == "content_after_hashtags" ||
+                    it == "safety_audit_leaked" ||
+                    it == "section_order_wrong"
+            }
     }
 
     fun voiceover(entity: ProjectEntity): String {
