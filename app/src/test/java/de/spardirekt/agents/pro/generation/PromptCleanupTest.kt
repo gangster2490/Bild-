@@ -565,7 +565,7 @@ HASHTAGS
         val cleaned = PromptCleanup.finalCleanupCopiedPrompt(raw, marketplace = false)
         val onScreen = cleaned.substringAfter("ON-SCREEN TEXT").substringBefore("VOICEOVER").trim()
         assertEquals("None.", onScreen)
-        val feature = cleaned.lineSequence().first { it.contains("4.0") }
+        val feature = cleaned.lineSequence().first { it.contains("FEATURE", ignoreCase = true) }
         assertTrue("expected one hand, got: $feature", feature.contains("one hand", ignoreCase = true))
         assertFalse(feature.contains("both hands", ignoreCase = true))
         assertFalse(cleaned.contains("Max 2"))
