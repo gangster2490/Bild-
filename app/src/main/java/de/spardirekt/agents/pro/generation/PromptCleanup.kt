@@ -235,8 +235,7 @@ object PromptCleanup {
         map["PRODUCT LOCK"] = compressProductLock(map["PRODUCT LOCK"].orEmpty(), maxDetails = 6)
         map["SETTING"] = simplifySetting(map["SETTING"].orEmpty())
         map["SHOT SEQUENCE"] = simplifyShotSequence(map["SHOT SEQUENCE"].orEmpty())
-        map["ON-SCREEN TEXT"] = clipWords(firstSentences(map["ON-SCREEN TEXT"].orEmpty(), 1), 10)
-            .ifBlank { "Max 2–3 short overlays." }
+        map["ON-SCREEN TEXT"] = simplifyOnScreenText(map["ON-SCREEN TEXT"].orEmpty())
         map["VOICEOVER"] = map["VOICEOVER"].orEmpty().lineSequence()
             .firstOrNull { it.isNotBlank() }?.trim().orEmpty()
             .ifBlank { "OFF" }
@@ -349,8 +348,9 @@ object PromptCleanup {
                 .distinct()
                 .take(5)
                 .joinToString(" ")
-            "TITLE", "VOICEOVER", "ON-SCREEN TEXT", "SETTING", "AUDIO", "CRITICAL" ->
+            "TITLE", "VOICEOVER", "SETTING", "AUDIO", "CRITICAL" ->
                 body.lineSequence().map { it.trim() }.filter { it.isNotBlank() }.joinToString(" ").trim()
+            "ON-SCREEN TEXT" -> simplifyOnScreenText(body)
             "PRODUCT LOCK" -> body.lineSequence()
                 .map { it.trim() }
                 .filter { it.isNotBlank() }
@@ -366,11 +366,66 @@ object PromptCleanup {
         }.trim()
     }
 
+    /**
+     * ON-SCREEN TEXT must only contain actual overlay copy that may appear in the video.
+     * Never keep production instructions, prompt labels, or meta rules here.
+     */
+    fun simplifyOnScreenText(raw: String): String {
+        val cleaned = raw.lineSequence()
+            .map { it.trim().trimStart('-', '•', '*').trim() }
+            .filter { it.isNotBlank() }
+            .filterNot { isOnScreenInstruction(it) }
+            .map { line ->
+                // Drop leading labels like "Text:" / "Overlay:"
+                line.replace(Regex("""(?i)^(text|overlay|on[-\s]?screen|caption|label)\s*:\s*"""), "")
+                    .trim()
+            }
+            .filter { it.isNotBlank() }
+            .filterNot { isOnScreenInstruction(it) }
+            .distinct()
+            .take(3)
+            .toList()
+        if (cleaned.isEmpty()) return "None."
+        val joined = cleaned.joinToString(" · ")
+        return clipChars(joined, 80)
+    }
+
+    private fun isOnScreenInstruction(line: String): Boolean {
+        val l = line.lowercase()
+        if (l == "none" || l == "none." || l == "off" || l == "n/a") return false
+        return l.contains("max 2") ||
+            l.contains("maximum 2") ||
+            l.contains("2–3") ||
+            l.contains("2-3") ||
+            l.contains("short overlay") ||
+            l.contains("product-specific overlay") ||
+            l.contains("concise product") ||
+            l.contains("no price") ||
+            l.contains("fake urgency") ||
+            l.contains("fake discount") ||
+            l.contains("unsupported spec") ||
+            l.contains("do not repeat") ||
+            l.contains("do not show") ||
+            l.contains("never show") ||
+            l.contains("never put") ||
+            l.contains("production instruction") ||
+            l.contains("prompt label") ||
+            l.startsWith("do not ") ||
+            l.startsWith("don't ") ||
+            l.startsWith("never ") ||
+            l.startsWith("maximum ") ||
+            l.startsWith("max ") ||
+            // Pure meta about the section itself
+            l.contains("on-screen text section") ||
+            l.contains("overlay rule") ||
+            REQUIRED_SECTIONS.any { sec -> l.equals(sec, ignoreCase = true) }
+    }
+
     private fun normalizeShotSequence(raw: String): String {
         val lines = if (hasFourBlocks(raw)) {
             Regex("""(?m)^\s*0\.0[^\n]*|^\s*2\.0[^\n]*|^\s*4\.0[^\n]*|^\s*6\.0[^\n]*""")
                 .findAll(raw)
-                .map { normalizeShotLine(it.value.trim()) }
+                .map { normalizeShotLine(enforceOneHandInFeatureDemo(it.value.trim())) }
                 .distinct()
                 .take(4)
                 .toList()
@@ -514,7 +569,7 @@ object PromptCleanup {
         if (hasFourBlocks(raw)) {
             val blocks = Regex("""(?m)^\s*0\.0[^\n]*|^\s*2\.0[^\n]*|^\s*4\.0[^\n]*|^\s*6\.0[^\n]*""")
                 .findAll(raw)
-                .map { clipShotLine(it.value.trim()) }
+                .map { clipShotLine(enforceOneHandInFeatureDemo(it.value.trim())) }
                 .distinct()
                 .take(4)
                 .toList()
@@ -523,6 +578,27 @@ object PromptCleanup {
             }
         }
         return CANONICAL_SHOT_SEQUENCE
+    }
+
+    /** FEATURE / DEMO may use at most one hand — never two hands / both hands. */
+    private fun enforceOneHandInFeatureDemo(line: String): String {
+        val isFeature = Regex("""(?i)4\.0|FEATURE\s*/\s*DEMO""").containsMatchIn(line)
+        if (!isFeature) return line
+        var out = line
+            .replace(Regex("""(?i)\bboth hands\b"""), "one hand")
+            .replace(Regex("""(?i)\btwo hands\b"""), "one hand")
+            .replace(Regex("""(?i)\bhands\b"""), "one hand")
+            .replace(Regex("""(?i)\bone one hand\b"""), "one hand")
+            .replace(Regex("""(?i)\bone hand one hand\b"""), "one hand")
+        if (Regex("""(?i)\bhand\b""").containsMatchIn(out) &&
+            !Regex("""(?i)\bone hand\b""").containsMatchIn(out)
+        ) {
+            out = out.replace(
+                Regex("""(?i)(FEATURE\s*/\s*DEMO\s*:?\s*)"""),
+                "$1one hand — "
+            )
+        }
+        return out.replace(Regex("""\s{2,}"""), " ").trim()
     }
 
     private fun clipShotLine(line: String): String {
@@ -812,7 +888,7 @@ object PromptCleanup {
             map["AUDIO"] = "Subtle music. Clear voice."
         }
         if (map["ON-SCREEN TEXT"].isNullOrBlank()) {
-            map["ON-SCREEN TEXT"] = "Max 2–3 short overlays. No price or fake urgency."
+            map["ON-SCREEN TEXT"] = "None."
         }
         if (map["SETTING"].isNullOrBlank()) {
             map["SETTING"] = "Uncluttered premium studio."
@@ -870,7 +946,7 @@ object PromptCleanup {
     private val CANONICAL_SHOT_SEQUENCE = """
         0.0–2.0s — HOOK: product visible with strongest verified detail
         2.0–4.0s — IDENTITY: clear full product framing
-        4.0–6.0s — FEATURE / DEMO: one hero feature only
+        4.0–6.0s — FEATURE / DEMO: one hero feature; one hand only if hands used
         6.0–8.0s — HERO / CTA: hero hold and soft CTA
     """.trimIndent()
 }

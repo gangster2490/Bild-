@@ -50,19 +50,25 @@ unsafeAssumptions, highRiskHallucinations, imageClassifications, hasMarketplaceS
         """
 CURRENT STAGE: CREATIVE_DIRECTOR
 
-Choose ONE strategy: Showcase, Demo, Lifestyle, Macro, Problem/Solution, Satisfying, Unboxing.
+Choose ONE strategy: Showcase, Demo, Lifestyle, Macro, Problem/Solution, Satisfying, Unboxing, HighPerformingProductAd.
 Do NOT default to Lifestyle.
-Prefer Demo only if real function is visually confirmed.
+
+AUTO MODE: prefer HighPerformingProductAd when product photos support a clean product-ad read.
+HighPerformingProductAd = high-performing 8s product ad arc:
+HOOK strongest verified detail → IDENTITY full product → FEATURE/DEMO one hero proof (one hand max if hands) → HERO/CTA soft invite.
+Only fall back from HighPerformingProductAd when evidence clearly fits another strategy better.
+
+Prefer Demo only if real function is visually confirmed and HighPerformingProductAd is not chosen.
 Only closed case shown => Showcase.
-Strong details => Macro/Showcase.
+Strong details => Macro/Showcase or HighPerformingProductAd.
 Select ONE heroFeature.
 Light natural sales tone. No fake hype.
 People only if Lifestyle or genuinely needed.
-Hands default off unless useful.
+Hands default off unless useful. If hands in FEATURE/DEMO: exactly one hand.
 
 Return JSON only:
 {
-  "strategy":"Showcase",
+  "strategy":"HighPerformingProductAd",
   "heroFeature":"...",
   "setting":"premium studio|kitchen|workshop|desk|garage|camping|lake|outdoor|countertop",
   "salesAngle":"...",
@@ -102,7 +108,7 @@ REFERENCES: ONE short sentence of what photos confirm
 PRODUCT LOCK: one short lock sentence + ONE line of 5–8 product-specific details (no fidelity essay)
 SETTING: one short line
 SHOT SEQUENCE: exactly four short timed lines (0.0–2.0 / 2.0–4.0 / 4.0–6.0 / 6.0–8.0). No meta paragraphs.
-ON-SCREEN TEXT: one short line
+ON-SCREEN TEXT: ONLY the actual overlay words that may appear in the video (or None). Never put production instructions, limits, or prompt labels here.
 VOICEOVER: spoken line or OFF
 AUDIO: one short line
 CRITICAL: one short line
@@ -135,6 +141,7 @@ Do NOT paste long internal fidelity essays into PRODUCT LOCK or CRITICAL.
 Do NOT duplicate marketplace rules across sections.
 Do NOT include legacy sections: VISUAL FIDELITY, PRODUCT FIDELITY, SAFETY AUDIT, QUALITY GATE, CREATIVE DIRECTOR, PRODUCT MODEL, PRIMARY/MAIN REFERENCE.
 Only the 12 required section headers may appear in veoPrompt.
+ON-SCREEN TEXT must never contain production instructions (e.g. "Max 2–3 overlays", "No price"). Only real overlay copy or None.
 """.trimIndent()
         )
     }

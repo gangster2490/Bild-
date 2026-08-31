@@ -163,15 +163,26 @@ $PRODUCT_FIDELITY_CORE
 CREATIVE DIRECTOR
 ==================================================
 Automatically evaluate:
-Showcase, Demo, Lifestyle, Macro, Problem/Solution, Satisfying, Unboxing.
+Showcase, Demo, Lifestyle, Macro, Problem/Solution, Satisfying, Unboxing,
+HighPerformingProductAd.
 
 Auto mode must select the best strategy based on evidence.
 Do NOT default to Lifestyle.
 
-If a real function is clearly shown: prefer Demo.
+AUTO — preferred creative pattern when product photos clearly support a product ad:
+HIGH-PERFORMING PRODUCT AD (strategy label: HighPerformingProductAd)
+Conversion-focused 8s arc:
+- HOOK: strongest verified visual detail or satisfying micro-action (product visible from frame 0)
+- IDENTITY: clear full product true to photos
+- FEATURE / DEMO: ONE hero feature only (tactile/functional only if visually confirmed; one hand max if hands)
+- HERO / CTA: beauty hold + soft invite
+Prefer this pattern in Auto whenever evidence allows a clean product-ad read.
+Fall back to Showcase / Demo / Macro / Satisfying / Unboxing / Problem/Solution when that pattern fits better.
+Lifestyle: only if genuinely useful — never the Auto default.
+
+If a real function is clearly shown and HighPerformingProductAd is not chosen: prefer Demo.
 Strong product details: prefer Macro / Showcase.
 Only a closed case shown: prefer Showcase. Do not invent operation.
-Lifestyle: only if genuinely useful.
 
 ==================================================
 ONE HERO FEATURE
@@ -236,6 +247,7 @@ HANDS
 ==================================================
 Default: no hands unless useful.
 If used: one consistent hand, one simple action, brief appearance, anatomically realistic.
+FEATURE / DEMO (4.0–6.0s): use only ONE hand — never two hands or both hands in that block.
 Do not create unnecessary choreography.
 
 ==================================================
@@ -330,9 +342,10 @@ Do not allow: “Закажите. Закажите в TikTok Shop.”
 ==================================================
 ON-SCREEN TEXT
 ==================================================
-Maximum 2–3 concise product-specific overlays.
-Do not repeat the whole voiceover.
-No price, fake discount, fake urgency, or unsupported specs.
+This section lists ONLY the actual words/labels that may appear as overlays in the video.
+Write product-specific overlay copy, or None.
+Never put production instructions, prompt labels, or meta rules into this section
+(e.g. never output “Max 2–3 overlays”, “No price”, “Do not repeat voiceover”).
 
 ==================================================
 AUDIO

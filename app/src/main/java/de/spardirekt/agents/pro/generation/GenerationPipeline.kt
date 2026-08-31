@@ -130,7 +130,7 @@ class GenerationPipeline(
                 val forced = if (input.creativeMode != CreativeMode.Auto) {
                     "User selected creative mode: ${input.creativeMode}. Prefer this unless evidence makes it unsafe."
                 } else {
-                    "User selected Auto. Choose best strategy from evidence. Do not default to Lifestyle."
+                    "User selected Auto. Prefer HighPerformingProductAd when product photos support a clean product-ad read. Choose best strategy from evidence. Do not default to Lifestyle."
                 }
                 creativePlanJson = openAi.chat(
                     apiKey = input.apiKey,

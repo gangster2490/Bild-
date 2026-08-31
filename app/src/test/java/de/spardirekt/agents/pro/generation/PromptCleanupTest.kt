@@ -498,4 +498,77 @@ HASHTAGS
         println("FINAL_CLEANUP_LENGTH=${cleaned.length}")
         println(cleaned)
     }
+
+    @Test
+    fun simplifyOnScreenText_stripsProductionInstructions_keepsRealCopy() {
+        assertEquals("None.", PromptCleanup.simplifyOnScreenText("Max 2–3 short overlays. No price or fake urgency."))
+        assertEquals("None.", PromptCleanup.simplifyOnScreenText("Do not repeat the whole voiceover."))
+        assertEquals("None.", PromptCleanup.simplifyOnScreenText("FORMAT"))
+        assertEquals(
+            "Compact fold",
+            PromptCleanup.simplifyOnScreenText(
+                """
+                Max 2–3 concise product-specific overlays.
+                Compact fold
+                No price or fake urgency.
+                """.trimIndent()
+            )
+        )
+        assertEquals(
+            "Folds flat · Soft hold",
+            PromptCleanup.simplifyOnScreenText("Text: Folds flat\nOverlay: Soft hold")
+        )
+    }
+
+    @Test
+    fun finalCleanup_replacesInstructionalOnScreenTextWithNone() {
+        val raw = """
+FORMAT
+Vertical 9:16. Exactly 8.0s.
+
+REFERENCES
+Photos confirm black frame.
+
+PRODUCT LOCK
+Preserve black frame.
+
+SETTING
+Studio.
+
+SHOT SEQUENCE
+0.0–2.0s — HOOK: detail
+2.0–4.0s — IDENTITY: full
+4.0–6.0s — FEATURE / DEMO: both hands open tray
+6.0–8.0s — HERO / CTA: hold
+
+ON-SCREEN TEXT
+Max 2–3 short overlays. No price or fake urgency.
+
+VOICEOVER
+OFF
+
+AUDIO
+Soft music.
+
+CRITICAL
+Keep identity.
+
+NEGATIVE PROMPT
+- no redesign
+
+TITLE
+Tray Chair
+
+HASHTAGS
+#a #b #c #d #TikTokShop
+""".trimIndent()
+        val cleaned = PromptCleanup.finalCleanupCopiedPrompt(raw, marketplace = false)
+        val onScreen = cleaned.substringAfter("ON-SCREEN TEXT").substringBefore("VOICEOVER").trim()
+        assertEquals("None.", onScreen)
+        val feature = cleaned.lineSequence().first { it.contains("4.0") }
+        assertTrue("expected one hand, got: $feature", feature.contains("one hand", ignoreCase = true))
+        assertFalse(feature.contains("both hands", ignoreCase = true))
+        assertFalse(cleaned.contains("Max 2"))
+        assertFalse(cleaned.contains("No price"))
+    }
 }
