@@ -96,19 +96,20 @@ ${lockedVoiceoverBlock(voice, lockedVoiceover)}
 Do not resend or invent unseen mechanisms.
 Do NOT include TIKTOK SHOP SAFETY AUDIT inside veoPrompt.
 
-SECTION LENGTH RULES (hard):
+SECTION LENGTH RULES (hard — keep the copied prompt SHORT):
 FORMAT: one short line (9:16, photorealistic, exactly 8.0s)
-REFERENCES: 1–3 short sentences of what photos confirm
-PRODUCT LOCK: one short lock sentence + 5–12 product-specific details only (no long fidelity essay)
+REFERENCES: ONE short sentence of what photos confirm
+PRODUCT LOCK: one short lock sentence + ONE line of 5–8 product-specific details (no fidelity essay)
 SETTING: one short line
-SHOT SEQUENCE: exactly four timed lines (0.0–2.0 / 2.0–4.0 / 4.0–6.0 / 6.0–8.0). No meta paragraphs.
+SHOT SEQUENCE: exactly four short timed lines (0.0–2.0 / 2.0–4.0 / 4.0–6.0 / 6.0–8.0). No meta paragraphs.
 ON-SCREEN TEXT: one short line
 VOICEOVER: spoken line or OFF
 AUDIO: one short line
 CRITICAL: one short line
-NEGATIVE PROMPT: 6–10 short bullets, product-specific when possible
+NEGATIVE PROMPT: 5–6 short bullets, product-specific when possible
 TITLE: one short title
 HASHTAGS: exactly 5
+Target total veoPrompt length: under ~1200 characters.
 
 Return JSON only. veoPrompt MUST be one JSON string. Use $nl for line breaks. Never put raw line breaks inside the JSON string.
 {

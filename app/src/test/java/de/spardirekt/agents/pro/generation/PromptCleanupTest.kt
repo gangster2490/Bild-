@@ -82,7 +82,10 @@ Something secret
         assertFalse(result.veoPrompt.contains("PRODUCT DESIGN = LOCKED"))
         assertFalse(result.veoPrompt.contains("CORE PRINCIPLE"))
         // Copied prompt stays concise — no long fidelity essay
-        assertTrue(result.veoPrompt.length < 2500)
+        assertTrue(
+            "too long: ${result.veoPrompt.length}",
+            result.veoPrompt.length <= PromptCleanup.MAX_COPIED_PROMPT_CHARS
+        )
     }
 
     @Test
@@ -234,8 +237,19 @@ HASHTAGS
         assertFalse(result.veoPrompt.contains("Timeline ends at 8.0s. Four blocks only. No extra scenes."))
         val negLines = PromptCleanup.extractSection(result.veoPrompt, "NEGATIVE PROMPT")
             .lineSequence().count { it.trim().startsWith("-") }
-        assertTrue("neg bullets=$negLines", negLines in 4..8)
-        assertTrue("still too long: ${result.veoPrompt.length} vs ${verbose.length}", result.veoPrompt.length < verbose.length)
+        assertTrue("neg bullets=$negLines", negLines in 4..6)
+        assertTrue(
+            "still too long: ${result.veoPrompt.length}",
+            result.veoPrompt.length <= PromptCleanup.MAX_COPIED_PROMPT_CHARS
+        )
+        assertTrue(
+            "should be much shorter than verbose input (${verbose.length})",
+            result.veoPrompt.length < verbose.length / 2 || result.veoPrompt.length < 1200
+        )
+        println("SIMPLIFIED_PROMPT_LENGTH=${result.veoPrompt.length}")
+        println("----- SIMPLIFIED PROMPT -----")
+        println(result.veoPrompt)
+        println("----- END -----")
     }
 
     @Test
