@@ -399,4 +399,103 @@ secret
         )
         assertTrue(result.veoPrompt.length <= PromptCleanup.MAX_COPIED_PROMPT_CHARS)
     }
+
+    @Test
+    fun finalCleanup_locksExactTwelveSectionGeminiShape() {
+        val messy = """
+```text
+FORMAT
+Vertical 9:16.
+Photorealistic commercial style.
+Exactly 8.0 seconds total.
+
+VISUAL FIDELITY
+Do not ship this.
+
+REFERENCES
+Photos confirm black tubular frame and red tray.
+Timeline ends at 8.0s.
+
+PRODUCT LOCK
+Match uploaded product photos exactly. Do not replace or redesign.
+black tubular X-braced frame, perforated upper backrest, red tray
+
+SETTING
+Uncluttered premium studio environment with soft light
+
+SHOT SEQUENCE
+0.0-2.0s — HOOK: tray detail
+2.0-4.0s — IDENTITY: full chair
+4.0-6.0s — FEATURE / DEMO: fold
+6.0-8.0s — HERO / CTA: hold
+Four blocks only. No continuation after 8.0s.
+
+ON-SCREEN TEXT
+Compact fold
+
+VOICEOVER
+OFF
+
+AUDIO
+Subtle background music. Clear voice.
+
+CRITICAL
+Keep product identity. Exactly 8.0s.
+
+NEGATIVE PROMPT
+- no generic chair
+- no redesign
+- no marketplace UI
+- no CGI look
+- no wrong colors
+- no missing parts
+- no invented accessories
+
+TITLE
+Fishing Chair
+
+HASHTAGS
+#a #b #c #d #TikTokShop
+```
+Озвучка: leak
+""".trimIndent()
+
+        val cleaned = PromptCleanup.finalCleanupCopiedPrompt(messy, marketplace = true)
+
+        // Exact header order, nothing else
+        val headers = Regex(
+            """(?m)^(FORMAT|REFERENCES|PRODUCT LOCK|SETTING|SHOT SEQUENCE|ON-SCREEN TEXT|VOICEOVER|AUDIO|CRITICAL|NEGATIVE PROMPT|TITLE|HASHTAGS)\s*$"""
+        ).findAll(cleaned).map { it.groupValues[1] }.toList()
+        assertEquals(
+            listOf(
+                "FORMAT", "REFERENCES", "PRODUCT LOCK", "SETTING", "SHOT SEQUENCE",
+                "ON-SCREEN TEXT", "VOICEOVER", "AUDIO", "CRITICAL", "NEGATIVE PROMPT",
+                "TITLE", "HASHTAGS"
+            ),
+            headers
+        )
+        // No leftover standalone ALL-CAPS doctrine headers
+        assertFalse(Regex("""(?im)^VISUAL FIDELITY\s*$""").containsMatchIn(cleaned))
+        assertFalse(Regex("""(?im)^HOOK\s*$""").containsMatchIn(cleaned))
+        assertEquals(12, headers.size)
+        assertFalse(cleaned.contains("VISUAL FIDELITY"))
+        assertFalse(cleaned.contains("```"))
+        assertFalse(cleaned.contains("Озвучка"))
+        assertFalse(cleaned.contains("Timeline ends"))
+        assertFalse(cleaned.contains("Four blocks only. No continuation"))
+        assertTrue(cleaned.contains("0.0–2.0s"))
+        assertTrue(cleaned.trimEnd().endsWith("#TikTokShop") || cleaned.contains("#TikTokShop"))
+        assertTrue(cleaned.endsWith("\n"))
+        assertFalse(cleaned.endsWith("\n\n"))
+        assertTrue(cleaned.length <= PromptCleanup.MAX_COPIED_PROMPT_CHARS)
+        val issues = PromptCleanup.validateCompleteness(
+            cleaned,
+            listOf("#a", "#b", "#c", "#d", "#TikTokShop")
+        )
+        assertTrue("issues=$issues", issues.none { it.startsWith("legacy_") })
+        assertTrue(issues.none { it == "content_after_hashtags" })
+        assertTrue(issues.none { it == "section_order_wrong" })
+        println("FINAL_CLEANUP_LENGTH=${cleaned.length}")
+        println(cleaned)
+    }
 }

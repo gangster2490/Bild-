@@ -259,7 +259,134 @@ object PromptCleanup {
                 "$name\n${map[name].orEmpty().trim()}"
             }.trim() + "\n"
         }
-        return out
+        return finalCleanupCopiedPrompt(out, marketplace)
+    }
+
+    /**
+     * Last local pass for the Gemini/VEO copy body.
+     * Locks exact 12-section shape, spacing, and residue stripping.
+     * Does not call the model.
+     */
+    fun finalCleanupCopiedPrompt(prompt: String, marketplace: Boolean = false): String {
+        if (prompt.isBlank()) return ""
+        var text = prompt.trim()
+        text = text.replace(Regex("```(?:json)?|```"), "")
+        text = stripAfterHashtags(text)
+        text = stripLegacySections(text)
+        text = text.replace(Regex("(?is)\\n*TIKTOK SHOP SAFETY AUDIT[\\s\\S]*$"), "").trim()
+        text = text.replace(Regex("(?im)^(Озвучка|Название|Хештеги)\\b.*$"), "")
+        text = text.replace(Regex("""(?im)^Timeline ends at.*$"""), "")
+        text = text.replace(Regex("""(?im)^Four blocks only\..*$"""), "")
+        text = text.replace(Regex("""(?im)^No continuation after.*$"""), "")
+
+        val map = linkedMapOf<String, String>()
+        REQUIRED_SECTIONS.forEach { name ->
+            map[name] = polishSectionBody(name, extractSection(text, name), marketplace)
+        }
+
+        // Guarantee required non-blank defaults for critical structural sections.
+        if (map["FORMAT"].isNullOrBlank()) {
+            map["FORMAT"] = "Vertical 9:16. Photorealistic TikTok Shop ad. Exactly 8.0s."
+        }
+        if (map["SHOT SEQUENCE"].isNullOrBlank() || !hasFourBlocks(map["SHOT SEQUENCE"].orEmpty())) {
+            map["SHOT SEQUENCE"] = CANONICAL_SHOT_SEQUENCE
+        }
+        if (map["PRODUCT LOCK"].isNullOrBlank()) {
+            map["PRODUCT LOCK"] = SHORT_PRODUCT_LOCK
+        }
+        if (map["VOICEOVER"].isNullOrBlank()) map["VOICEOVER"] = "OFF"
+        if (map["TITLE"].isNullOrBlank()) map["TITLE"] = "Product Ad"
+        if (map["HASHTAGS"].isNullOrBlank()) {
+            map["HASHTAGS"] = "#TikTokShop #ProductAd #MustSee #HomeFinds #ShopNow"
+        }
+        if (marketplace) {
+            val refs = map["REFERENCES"].orEmpty()
+            if (!refs.contains("marketplace", ignoreCase = true)) {
+                map["REFERENCES"] = listOf(refs, SHORT_MARKETPLACE)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" ")
+                    .trim()
+            }
+        }
+
+        return REQUIRED_SECTIONS.joinToString("\n\n") { name ->
+            "$name\n${map[name].orEmpty().trim()}"
+        }.trim() + "\n"
+    }
+
+    private fun polishSectionBody(name: String, raw: String, marketplace: Boolean): String {
+        var body = raw.trim()
+            .replace(Regex("\r\n?"), "\n")
+            .replace(Regex("[ \t]+"), " ")
+            .replace(Regex(" *\n *"), "\n")
+            .replace(Regex("\n{2,}"), "\n")
+            .trim()
+        body = stripLegacyInlineHeaders(body)
+        body = body.replace(Regex("(?is)PRODUCT DESIGN\\s*=\\s*LOCKED\\.?"), "")
+            .replace(Regex("(?is)CORE PRINCIPLE\\s*:.*"), "")
+            .trim()
+
+        return when (name) {
+            "FORMAT" -> "Vertical 9:16. Photorealistic TikTok Shop ad. Exactly 8.0s."
+            "SHOT SEQUENCE" -> normalizeShotSequence(body)
+            "NEGATIVE PROMPT" -> body.lineSequence()
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .map { line ->
+                    val t = line.removePrefix("-").trim()
+                    "- $t"
+                }
+                .distinctBy { it.lowercase() }
+                .take(6)
+                .joinToString("\n")
+            "HASHTAGS" -> Regex("#[\\p{L}\\p{N}_]+")
+                .findAll(body)
+                .map { it.value }
+                .distinct()
+                .take(5)
+                .joinToString(" ")
+            "TITLE", "VOICEOVER", "ON-SCREEN TEXT", "SETTING", "AUDIO", "CRITICAL" ->
+                body.lineSequence().map { it.trim() }.filter { it.isNotBlank() }.joinToString(" ").trim()
+            "PRODUCT LOCK" -> body.lineSequence()
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .filterNot { isGenericFidelityBoilerplate(it) }
+                .joinToString("\n")
+            "REFERENCES" -> {
+                val one = body.lineSequence().map { it.trim() }.filter { it.isNotBlank() }.joinToString(" ")
+                if (marketplace && !one.contains("marketplace", ignoreCase = true)) {
+                    "$one $SHORT_MARKETPLACE".trim()
+                } else one
+            }
+            else -> body
+        }.trim()
+    }
+
+    private fun normalizeShotSequence(raw: String): String {
+        val lines = if (hasFourBlocks(raw)) {
+            Regex("""(?m)^\s*0\.0[^\n]*|^\s*2\.0[^\n]*|^\s*4\.0[^\n]*|^\s*6\.0[^\n]*""")
+                .findAll(raw)
+                .map { normalizeShotLine(it.value.trim()) }
+                .distinct()
+                .take(4)
+                .toList()
+        } else {
+            emptyList()
+        }
+        return if (lines.size == 4) lines.joinToString("\n") else CANONICAL_SHOT_SEQUENCE
+    }
+
+    private fun normalizeShotLine(line: String): String {
+        return clipShotLine(
+            line
+                .replace(Regex("""\b0\.0\s*[-–—]\s*2\.0"""), "0.0–2.0")
+                .replace(Regex("""\b2\.0\s*[-–—]\s*4\.0"""), "2.0–4.0")
+                .replace(Regex("""\b4\.0\s*[-–—]\s*6\.0"""), "4.0–6.0")
+                .replace(Regex("""\b6\.0\s*[-–—]\s*8\.0"""), "6.0–8.0")
+                .replace(Regex("""\s+—\s+"""), " — ")
+                .replace(Regex("""\s{2,}"""), " ")
+                .trim()
+        )
     }
 
     fun validateCompleteness(prompt: String, hashtags: List<String>): List<String> {
@@ -288,6 +415,13 @@ object PromptCleanup {
             !prompt.contains("6.0") || !prompt.contains("8.0")
         ) {
             issues += "incomplete_timeline"
+        }
+        // Exact section order among required headers present
+        val foundOrder = REQUIRED_SECTIONS.mapNotNull { sec ->
+            Regex("""(?im)^${Regex.escape(sec)}\s*$""").find(prompt)?.range?.first?.let { sec to it }
+        }.sortedBy { it.second }.map { it.first }
+        if (foundOrder != REQUIRED_SECTIONS) {
+            issues += "section_order_wrong"
         }
         return issues
     }
