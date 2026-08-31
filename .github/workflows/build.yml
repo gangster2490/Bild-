@@ -2,7 +2,8 @@ name: Build APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, 'cursor/**' ]
+  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -26,12 +27,22 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest
+
       - name: Build Release APK
         run: ./gradlew assembleRelease
+
+      - name: Copy APK into repo apk folder
+        run: |
+          mkdir -p apk
+          cp app/build/outputs/apk/release/app-release.apk apk/VeoPromptPro-3.2.2.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: SD-Agents-APK
-          path: app/build/outputs/apk/release/app-release.apk
+          name: Veo-Prompt-Pro-APK
+          path: |
+            app/build/outputs/apk/release/app-release.apk
+            apk/*.apk
           retention-days: 30
