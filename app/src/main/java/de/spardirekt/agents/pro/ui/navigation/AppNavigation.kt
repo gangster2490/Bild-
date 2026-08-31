@@ -1,5 +1,7 @@
 package de.spardirekt.agents.pro.ui.navigation
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +23,7 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,7 +40,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import androidx.compose.runtime.LaunchedEffect
 import de.spardirekt.agents.pro.ui.create.CreateScreen
 import de.spardirekt.agents.pro.ui.create.CreateViewModel
 import de.spardirekt.agents.pro.ui.history.HistoryScreen
@@ -155,7 +157,11 @@ fun VeoPromptProNav() {
             }
             composable(
                 route = Routes.RESULT,
-                arguments = listOf(navArgument("projectId") { type = NavType.StringType })
+                arguments = listOf(navArgument("projectId") { type = NavType.StringType }),
+                enterTransition = { EnterTransition.None },
+                exitTransition = { ExitTransition.None },
+                popEnterTransition = { EnterTransition.None },
+                popExitTransition = { ExitTransition.None }
             ) { entry ->
                 val id = entry.arguments?.getString("projectId").orEmpty()
                 val vm: ResultViewModel = viewModel()

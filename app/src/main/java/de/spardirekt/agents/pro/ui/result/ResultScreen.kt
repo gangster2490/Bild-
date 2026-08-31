@@ -6,8 +6,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -35,16 +33,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -67,36 +61,16 @@ import de.spardirekt.agents.pro.ui.theme.VppShapes
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
 
 class ResultViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = VeoPromptProApp.instance.projectRepository
 
     fun observe(projectId: String): StateFlow<ProjectEntity?> =
-        repo.observe(projectId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-
-    /**
-     * Rewrite any legacy/raw stored mainPrompt blob to the current cleaned
-     * Gemini/VEO composition so runtime Result always matches cleanup rules.
-     */
-    fun ensureCleanStoredPrompt(projectId: String) {
-        viewModelScope.launch {
-            val entity = repo.get(projectId) ?: return@launch
-            if (entity.status != de.spardirekt.agents.pro.model.ProjectStatus.Ready.name) return@launch
-            val tags = repo.parseHashtags(entity)
-            if (!ResultComposition.needsStoreRewrite(entity, tags)) return@launch
-            val cleaned = ResultComposition.veoPrompt(entity, tags)
-            if (cleaned.isBlank()) return@launch
-            repo.save(
-                entity.copy(
-                    veoPrompt = cleaned,
-                    voiceover = ResultComposition.voiceover(entity),
-                    title = ResultComposition.title(entity).let { if (it == "—") entity.title else it },
-                    hashtagsJson = repo.encodeHashtags(ResultComposition.hashtags(entity, tags))
-                )
-            )
-        }
-    }
+        repo.observe(projectId).stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            initialValue = null
+        )
 
     fun hashtags(entity: ProjectEntity): List<String> =
         ResultComposition.hashtags(entity, repo.parseHashtags(entity))
@@ -121,19 +95,35 @@ fun ResultScreen(
     onOpenSettings: () -> Unit
 ) {
     val project by viewModel.observe(projectId).collectAsStateWithLifecycle()
-    val type = LocalVppType.current
     val context = androidx.compose.ui.platform.LocalContext.current
-    var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { visible = true }
-    LaunchedEffect(projectId) { viewModel.ensureCleanStoredPrompt(projectId) }
-
     val entity = project
+
+    val veoPrompt = remember(entity?.id, entity?.veoPrompt, entity?.voiceover, entity?.title, entity?.hashtagsJson) {
+        entity?.let { viewModel.veoPrompt(it) }.orEmpty()
+    }
+    val voiceover = remember(entity?.id, entity?.voiceover, entity?.veoPrompt) {
+        entity?.let { viewModel.voiceover(it) }.orEmpty()
+    }
+    val title = remember(entity?.id, entity?.title, entity?.veoPrompt) {
+        entity?.let { viewModel.title(it) }.orEmpty()
+    }
+    val hashtags = remember(entity?.id, entity?.hashtagsJson, entity?.veoPrompt) {
+        entity?.let { viewModel.hashtags(it) }.orEmpty()
+    }
+    val voiceLabel = remember(entity?.voiceLanguage) {
+        entity?.let { ResultComposition.voiceLabel(it) }.orEmpty()
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    listOf(VppColors.backgroundLight, VppColors.backgroundGlow.copy(alpha = 0.5f), VppColors.backgroundLight)
+                    listOf(
+                        VppColors.backgroundLight,
+                        VppColors.backgroundGlow.copy(alpha = 0.5f),
+                        VppColors.backgroundLight
+                    )
                 )
             )
     ) {
@@ -149,48 +139,41 @@ fun ResultScreen(
                 onNewProject = onBackToCreate,
                 trailing = {
                     HeaderSquareButton(onClick = {
-                        entity?.let { shareText(context, viewModel.veoPrompt(it)) }
+                        if (veoPrompt.isNotBlank()) shareText(context, veoPrompt)
                     }) {
                         Icon(Icons.Outlined.Share, null, tint = VppColors.textLight, modifier = Modifier.size(18.dp))
                     }
                     Spacer(Modifier.width(8.dp))
                     HeaderSquareButton(onClick = {
-                        entity?.let { copyText(context, viewModel.veoPrompt(it)) }
+                        if (veoPrompt.isNotBlank()) copyText(context, veoPrompt)
                     }) {
                         Icon(Icons.Outlined.ContentCopy, null, tint = VppColors.textLight, modifier = Modifier.size(18.dp))
                     }
                 }
             )
             Spacer(Modifier.height(18.dp))
-            androidx.compose.animation.AnimatedVisibility(
-                visible = visible,
-                enter = fadeIn() + slideInVertically { it / 8 }
-            ) {
-                Column {
-                    GradientHeading("Результат")
-                    Spacer(Modifier.height(16.dp))
-                    if (entity == null) {
-                        NavyCard {
-                            Text("Загрузка…", color = VppColors.textMuted)
-                        }
-                    } else {
-                        ResultBody(
-                            entity = entity,
-                            veoPrompt = viewModel.veoPrompt(entity),
-                            voiceover = viewModel.voiceover(entity),
-                            title = viewModel.title(entity),
-                            voiceLabel = ResultComposition.voiceLabel(entity),
-                            hashtags = viewModel.hashtags(entity),
-                            onCopyPrompt = { copyText(context, viewModel.veoPrompt(entity)) },
-                            onSharePrompt = { shareText(context, viewModel.veoPrompt(entity)) },
-                            onCopyPackage = { copyText(context, viewModel.fullPackage(entity)) },
-                            onSharePackage = { shareText(context, viewModel.fullPackage(entity)) },
-                            onCopyVo = { copyText(context, viewModel.voiceover(entity)) },
-                            onCopyTitle = { copyText(context, viewModel.title(entity)) },
-                            onCopyTags = { copyText(context, viewModel.hashtags(entity).joinToString(" ")) }
-                        )
-                    }
-                }
+            // No enter animation — AnimatedVisibility(visible=false) caused a blank/white flash.
+            GradientHeading("Результат")
+            Spacer(Modifier.height(16.dp))
+            if (entity != null) {
+                ResultBody(
+                    entity = entity,
+                    veoPrompt = veoPrompt,
+                    voiceover = voiceover,
+                    title = title,
+                    voiceLabel = voiceLabel,
+                    hashtags = hashtags,
+                    onCopyPrompt = { copyText(context, veoPrompt) },
+                    onSharePrompt = { shareText(context, veoPrompt) },
+                    onCopyPackage = { copyText(context, viewModel.fullPackage(entity)) },
+                    onSharePackage = { shareText(context, viewModel.fullPackage(entity)) },
+                    onCopyVo = { copyText(context, voiceover) },
+                    onCopyTitle = { copyText(context, title) },
+                    onCopyTags = { copyText(context, hashtags.joinToString(" ")) }
+                )
+            } else {
+                // Keep layout stable while Room emits — no loading-card pop-in flash.
+                Spacer(Modifier.height(240.dp))
             }
         }
     }
